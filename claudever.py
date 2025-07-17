@@ -1,0 +1,646 @@
+import sys
+import json
+import os
+from datetime import datetime, timedelta
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import QTimer
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+# If modifying these scopes, delete the file token.json.
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+class LoginDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Google Calendar Login")
+        self.setFixedSize(400, 200)
+        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+        
+        layout = QVBoxLayout()
+        
+        # Logo/Title
+        title = QLabel("Google Calendar")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 24px; font-weight: bold; margin: 20px;")
+        layout.addWidget(title)
+        
+        # Instructions
+        instruction = QLabel("Click the button below to authenticate with Google Calendar")
+        instruction.setAlignment(Qt.AlignCenter)
+        instruction.setWordWrap(True)
+        layout.addWidget(instruction)
+        
+        # Login button
+        self.login_btn = QPushButton("Login with Google")
+        self.login_btn.setFixedSize(200, 40)
+        self.login_btn.clicked.connect(self.authenticate)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.login_btn)
+        btn_layout.addStretch()
+        
+        layout.addLayout(btn_layout)
+        layout.addStretch()
+        
+        self.setLayout(layout)
+        
+    def authenticate(self):
+        try:
+            creds = None
+            # The file token.json stores the user's access and refresh tokens.
+            if os.path.exists('token.json'):
+                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+            
+            # If there are no (valid) credentials available, let the user log in.
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        'credentials.json', SCOPES)
+                    creds = flow.run_local_server(port=0)
+                
+                # Save the credentials for the next run
+                with open('token.json', 'w') as token:
+                    token.write(creds.to_json())
+            
+            # Test the connection
+            service = build('calendar', 'v3', credentials=creds)
+            profile = service.calendars().get(calendarId='primary').execute()
+            
+            self.user_email = profile.get('id', 'Unknown')
+            self.credentials = creds
+            self.accept()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Authentication Error", f"Failed to authenticate: {str(e)}")
+
+class DateSearchDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Search Calendar by Date")
+        self.setFixedSize(300, 150)
+        
+        layout = QVBoxLayout()
+        
+        label = QLabel("Select a date to search:")
+        layout.addWidget(label)
+        
+        self.date_edit = QDateEdit()
+        self.date_edit.setDate(QDate.currentDate())
+        self.date_edit.setCalendarPopup(True)
+        layout.addWidget(self.date_edit)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+    
+    def get_date(self):
+        return self.date_edit.date().toPyDate()
+
+class AddEventDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Event")
+        self.setFixedSize(400, 300)
+        
+        layout = QVBoxLayout()
+        
+        # Event name
+        layout.addWidget(QLabel("Event Name:"))
+        self.name_edit = QLineEdit()
+        layout.addWidget(self.name_edit)
+        
+        # Location
+        layout.addWidget(QLabel("Location:"))
+        self.location_edit = QLineEdit()
+        layout.addWidget(self.location_edit)
+        
+        # Start date/time
+        layout.addWidget(QLabel("Start Date & Time:"))
+        self.start_datetime = QDateTimeEdit()
+        self.start_datetime.setDateTime(QDateTime.currentDateTime())
+        self.start_datetime.setCalendarPopup(True)
+        layout.addWidget(self.start_datetime)
+        
+        # End date/time
+        layout.addWidget(QLabel("End Date & Time:"))
+        self.end_datetime = QDateTimeEdit()
+        self.end_datetime.setDateTime(QDateTime.currentDateTime().addSecs(3600))
+        self.end_datetime.setCalendarPopup(True)
+        layout.addWidget(self.end_datetime)
+        
+        # Remarks
+        layout.addWidget(QLabel("Remarks:"))
+        self.remarks_edit = QTextEdit()
+        self.remarks_edit.setMaximumHeight(60)
+        layout.addWidget(self.remarks_edit)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+    
+    def get_event_data(self):
+        return {
+            'name': self.name_edit.text(),
+            'location': self.location_edit.text(),
+            'start': self.start_datetime.dateTime().toPyDateTime(),
+            'end': self.end_datetime.dateTime().toPyDateTime(),
+            'remarks': self.remarks_edit.toPlainText()
+        }
+
+class CalendarTable(QTableWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_app = parent
+        self.setColumnCount(5)
+        self.setHorizontalHeaderLabels(['Name', 'Location', 'Start Time', 'End Time', 'Remarks'])
+        self.event_data = {}  # Store event data by row
+        
+        # Set column widths
+        header = self.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.resizeSection(0, 200)
+        header.resizeSection(1, 150)
+        header.resizeSection(2, 120)
+        header.resizeSection(3, 120)
+        header.resizeSection(4, 250)
+        
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setAlternatingRowColors(True)
+        self.cellClicked.connect(self.handle_cell_click)
+        
+        # Add some empty rows for adding new events
+        self.setRowCount(20)
+        
+        # Create actions widget
+        self.actions_widget = None
+    
+    def handle_cell_click(self, row, column):
+        if self.item(row, 0) is None or self.item(row, 0).text() == "":
+            # Empty row clicked - add new event
+            self.parent_app.add_event()
+    
+    def show_actions_menu(self, row, event_data):
+        menu = QMenu(self)
+        update_action = menu.addAction("Update")
+        delete_action = menu.addAction("Delete")
+        
+        update_action.triggered.connect(lambda: self.parent_app.update_event(event_data))
+        delete_action.triggered.connect(lambda: self.parent_app.delete_event(event_data))
+        
+        # Show menu at mouse position
+        menu.exec_(QCursor.pos())
+    
+    def enterEvent(self, event):
+        self.setMouseTracking(True)
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        self.setMouseTracking(False)
+        super().leaveEvent(event)
+        if self.actions_widget:
+            self.actions_widget.hide()
+    
+    def mouseMoveEvent(self, event):
+        row = self.rowAt(event.y())
+        if row >= 0 and self.item(row, 0) and self.item(row, 0).text():
+            self.selectRow(row)
+            
+            # Show actions for the row
+            if self.event_data.get(row):
+                # Create container widget for buttons
+                if self.actions_widget:
+                    self.actions_widget.hide()
+                    self.actions_widget.deleteLater()
+                
+                self.actions_widget = QWidget(self)
+                layout = QHBoxLayout(self.actions_widget)
+                layout.setSpacing(5)
+                layout.setContentsMargins(0, 0, 0, 0)
+                
+                # Edit button
+                edit_btn = QPushButton("Edit", self.actions_widget)
+                edit_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 5px 10px;
+                        border-radius: 3px;
+                    }
+                    QPushButton:hover {
+                        background-color: #45a049;
+                    }
+                """)
+                edit_btn.setCursor(Qt.PointingHandCursor)
+                edit_btn.clicked.connect(lambda: self.parent_app.update_event(self.event_data[row]))
+                
+                # Delete button
+                delete_btn = QPushButton("Delete", self.actions_widget)
+                delete_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #f44336;
+                        color: white;
+                        border: none;
+                        padding: 5px 10px;
+                        border-radius: 3px;
+                    }
+                    QPushButton:hover {
+                        background-color: #da190b;
+                    }
+                """)
+                delete_btn.setCursor(Qt.PointingHandCursor)
+                delete_btn.clicked.connect(lambda: self.parent_app.delete_event(self.event_data[row]))
+                
+                layout.addWidget(edit_btn)
+                layout.addWidget(delete_btn)
+                
+                # Position the buttons container at the end of the row
+                rect = self.visualItemRect(self.item(row, 4))  # Get last column rect
+                self.actions_widget.setFixedSize(160, rect.height() - 2)
+                self.actions_widget.move(rect.right() - 165, rect.y() + 1)
+                self.actions_widget.show()
+        else:
+            if self.actions_widget:
+                self.actions_widget.hide()
+        super().mouseMoveEvent(event)
+
+class UpdateEventDialog(AddEventDialog):
+    def __init__(self, event_data, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Update Event")
+        
+        # Pre-fill the fields with existing event data
+        self.name_edit.setText(event_data.get('summary', ''))
+        self.location_edit.setText(event_data.get('location', ''))
+        self.remarks_edit.setText(event_data.get('description', ''))
+        
+        # Parse start and end times
+        start = event_data['start'].get('dateTime', event_data['start'].get('date'))
+        end = event_data['end'].get('dateTime', event_data['end'].get('date'))
+        
+        if 'T' in start:
+            start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+            self.start_datetime.setDateTime(QDateTime.fromSecsSinceEpoch(int(start_dt.timestamp())))
+        
+        if 'T' in end:
+            end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+            self.end_datetime.setDateTime(QDateTime.fromSecsSinceEpoch(int(end_dt.timestamp())))
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.service = None
+        self.user_email = ""
+        self.current_date = datetime.now().date()
+        self.theme = "light"
+        self.language = "en"
+        
+        self.setWindowTitle("Google Calendar Desktop")
+        self.setFixedSize(1080, 720)
+        
+        self.setup_ui()
+        self.apply_theme()
+        
+        # Show login dialog
+        self.show_login()
+    
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout(central_widget)
+        
+        # Top bar with cog icon
+        top_bar = self.create_top_bar()
+        layout.addWidget(top_bar)
+        
+        # User info and date
+        info_bar = self.create_info_bar()
+        layout.addWidget(info_bar)
+        
+        # Tab widget
+        self.tab_widget = QTabWidget()
+        
+        # Today's events tab
+        self.today_table = CalendarTable(self)
+        self.tab_widget.addTab(self.today_table, "Today's Events")
+        
+        # Past events tab
+        self.past_table = CalendarTable(self)
+        self.tab_widget.addTab(self.past_table, "Past Events")
+        
+        # Upcoming events tab
+        self.upcoming_table = CalendarTable(self)
+        self.tab_widget.addTab(self.upcoming_table, "Upcoming Events")
+        
+        layout.addWidget(self.tab_widget)
+    
+    def create_top_bar(self):
+        top_bar = QWidget()
+        layout = QHBoxLayout(top_bar)
+        
+        # Cog icon button
+        self.cog_btn = QPushButton("⚙")
+        self.cog_btn.setFixedSize(40, 40)
+        self.cog_btn.setStyleSheet("font-size: 16px; border: none; padding: 5px;")
+        self.cog_btn.clicked.connect(self.show_settings_menu)
+        
+        layout.addWidget(self.cog_btn)
+        layout.addStretch()
+        
+        return top_bar
+    
+    def create_info_bar(self):
+        info_bar = QWidget()
+        layout = QHBoxLayout(info_bar)
+        
+        # User email (center)
+        self.user_label = QLabel("Not logged in")
+        self.user_label.setAlignment(Qt.AlignCenter)
+        self.user_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        
+        # Date (right)
+        self.date_label = QLabel(self.current_date.strftime("%Y-%m-%d"))
+        self.date_label.setStyleSheet("font-size: 16px;")
+        
+        layout.addStretch()
+        layout.addWidget(self.user_label)
+        layout.addStretch()
+        layout.addWidget(self.date_label)
+        
+        return info_bar
+    
+    def show_settings_menu(self):
+        menu = QMenu(self)
+        
+        # Language submenu
+        lang_menu = menu.addMenu("Language")
+        lang_menu.addAction("English", lambda: self.change_language("en"))
+        lang_menu.addAction("Spanish", lambda: self.change_language("es"))
+        
+        # Theme submenu
+        theme_menu = menu.addMenu("Theme")
+        theme_menu.addAction("Light", lambda: self.change_theme("light"))
+        theme_menu.addAction("Dark", lambda: self.change_theme("dark"))
+        
+        # Other options
+        menu.addAction("Search by Date", self.search_by_date)
+        menu.addAction("Add Event", self.add_event)
+        menu.addSeparator()
+        menu.addAction("Logout", self.logout)
+        
+        # Show menu at cog button position
+        button_pos = self.cog_btn.mapToGlobal(self.cog_btn.rect().bottomLeft())
+        menu.exec_(button_pos)
+    
+    def show_login(self):
+        login_dialog = LoginDialog(self)
+        if login_dialog.exec_() == QDialog.Accepted:
+            self.user_email = login_dialog.user_email
+            self.service = build('calendar', 'v3', credentials=login_dialog.credentials)
+            self.user_label.setText(self.user_email)
+            self.load_events()
+        else:
+            sys.exit()
+    
+    def change_language(self, lang):
+        self.language = lang
+        # Here you would implement language switching logic
+        QMessageBox.information(self, "Language", f"Language changed to {lang}")
+    
+    def change_theme(self, theme):
+        self.theme = theme
+        self.apply_theme()
+    
+    def apply_theme(self):
+        if self.theme == "dark":
+            self.setStyleSheet("""
+                QMainWindow { background-color: #2b2b2b; color: white; }
+                QWidget { background-color: #2b2b2b; color: white; }
+                QTabWidget::pane { background-color: #3c3c3c; }
+                QTabBar::tab { background-color: #404040; color: white; padding: 8px; }
+                QTabBar::tab:selected { background-color: #555555; }
+                QTableWidget { background-color: #3c3c3c; alternate-background-color: #404040; }
+                QHeaderView::section { background-color: #555555; color: white; }
+                QPushButton { background-color: #555555; color: white; border: 1px solid #777; padding: 5px; }
+                QPushButton:hover { background-color: #666666; }
+            """)
+        else:
+            self.setStyleSheet("""
+                QMainWindow { background-color: white; color: black; }
+                QWidget { background-color: white; color: black; }
+                QTabWidget::pane { background-color: #f0f0f0; }
+                QTabBar::tab { background-color: #e0e0e0; color: black; padding: 8px; }
+                QTabBar::tab:selected { background-color: #d0d0d0; }
+                QTableWidget { background-color: white; alternate-background-color: #f5f5f5; }
+                QHeaderView::section { background-color: #e0e0e0; color: black; }
+                QPushButton { background-color: #e0e0e0; color: black; border: 1px solid #ccc; padding: 5px; }
+                QPushButton:hover { background-color: #d0d0d0; }
+            """)
+    
+    def search_by_date(self):
+        dialog = DateSearchDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_date = dialog.get_date()
+            self.current_date = selected_date
+            self.date_label.setText(selected_date.strftime("%Y-%m-%d"))
+            self.load_events()
+    
+    def add_event(self):
+        dialog = AddEventDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            event_data = dialog.get_event_data()
+            self.create_calendar_event(event_data)
+    
+    def create_calendar_event(self, event_data):
+        try:
+            event = {
+                'summary': event_data['name'],
+                'location': event_data['location'],
+                'description': event_data['remarks'],
+                'start': {
+                    'dateTime': event_data['start'].isoformat(),
+                    'timeZone': 'UTC',
+                },
+                'end': {
+                    'dateTime': event_data['end'].isoformat(),
+                    'timeZone': 'UTC',
+                },
+            }
+            
+            event = self.service.events().insert(calendarId='primary', body=event).execute()
+            QMessageBox.information(self, "Success", "Event created successfully!")
+            self.load_events()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to create event: {str(e)}")
+    
+    def load_events(self):
+        if not self.service:
+            return
+        
+        try:
+            # Get today's events
+            today_start = datetime.combine(self.current_date, datetime.min.time())
+            today_end = datetime.combine(self.current_date, datetime.max.time())
+            
+            today_events = self.get_events(today_start, today_end)
+            self.populate_table(self.today_table, today_events)
+            
+            # Get past events (last 30 days)
+            past_start = today_start - timedelta(days=30)
+            past_events = self.get_events(past_start, today_start)
+            self.populate_table(self.past_table, past_events)
+            
+            # Get upcoming events (next 30 days)
+            upcoming_end = today_end + timedelta(days=30)
+            upcoming_events = self.get_events(today_end, upcoming_end)
+            self.populate_table(self.upcoming_table, upcoming_events)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load events: {str(e)}")
+    
+    def get_events(self, start_time, end_time):
+        events_result = self.service.events().list(
+            calendarId='primary',
+            timeMin=start_time.isoformat() + 'Z',
+            timeMax=end_time.isoformat() + 'Z',
+            singleEvents=True,
+            orderBy='startTime',
+            maxResults=2500,  # Get more events
+            showDeleted=False  # Explicitly exclude deleted events
+        ).execute()
+        
+        return events_result.get('items', [])
+    
+    def populate_table(self, table, events):
+        # Clear the table completely
+        table.clearContents()
+        table.event_data = {}  # Clear existing event data
+        
+        # Set new row count
+        table.setRowCount(len(events) + 10)  # Extra rows for new events
+        
+        # Filter out any deleted events
+        active_events = [event for event in events if not event.get('status') == 'cancelled']
+        
+        for i, event in enumerate(active_events):
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+            
+            # Parse datetime strings
+            if 'T' in start:
+                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                start_str = start_dt.strftime("%H:%M")
+            else:
+                start_str = "All day"
+            
+            if 'T' in end:
+                end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                end_str = end_dt.strftime("%H:%M")
+            else:
+                end_str = "All day"
+            
+            # Create new items for each cell
+            table.setItem(i, 0, QTableWidgetItem(event.get('summary', 'No Title')))
+            table.setItem(i, 1, QTableWidgetItem(event.get('location', '')))
+            table.setItem(i, 2, QTableWidgetItem(start_str))
+            table.setItem(i, 3, QTableWidgetItem(end_str))
+            table.setItem(i, 4, QTableWidgetItem(event.get('description', '')))
+            
+            # Store event data for this row
+            table.event_data[i] = event
+        
+        # Refresh the table
+        table.viewport().update()
+    
+    def logout(self):
+        if os.path.exists('token.json'):
+            os.remove('token.json')
+        self.close()
+    
+    def update_event(self, event_data):
+        dialog = UpdateEventDialog(event_data, self)
+        if dialog.exec_() == QDialog.Accepted:
+            updated_data = dialog.get_event_data()
+            try:
+                event = {
+                    'summary': updated_data['name'],
+                    'location': updated_data['location'],
+                    'description': updated_data['remarks'],
+                    'start': {
+                        'dateTime': updated_data['start'].isoformat(),
+                        'timeZone': 'UTC',
+                    },
+                    'end': {
+                        'dateTime': updated_data['end'].isoformat(),
+                        'timeZone': 'UTC',
+                    },
+                }
+                
+                # Preserve any existing fields that we don't update
+                for key in event_data:
+                    if key not in event and key not in ['start', 'end']:
+                        event[key] = event_data[key]
+                
+                self.service.events().update(
+                    calendarId='primary',
+                    eventId=event_data['id'],
+                    body=event
+                ).execute()
+                
+                QMessageBox.information(self, "Success", "Event updated successfully!")
+                
+                # Force a refresh from the server
+                QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
+                
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to update event: {str(e)}")
+    
+    def delete_event(self, event_data):
+        reply = QMessageBox.question(
+            self,
+            "Delete Event",
+            "Are you sure you want to delete this event?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                self.service.events().delete(
+                    calendarId='primary',
+                    eventId=event_data['id']
+                ).execute()
+                
+                QMessageBox.information(self, "Success", "Event deleted successfully!")
+                
+                # Force a refresh from the server
+                QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
+                
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to delete event: {str(e)}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle('Fusion')  # Modern look
+    
+    window = MainWindow()
+    window.show()
+    
+    sys.exit(app.exec_())

@@ -67,8 +67,17 @@ class GoogleCalendarAuth:
             os.remove('token.json')
         self.creds = None
         self.service = None
+
+    def get_calendars(self):
+        try:
+            calendar_list = service.calendarList().list().execute()
+            return calendar_list.get("items",[])
+        except Httperror as error:
+            print(f"Error : {error}")
+            return None
+
         
-    def get_events(self, date):
+    def get_events(self, date,calendar_id):
         """Get events for a specific date"""
         if not self.service:
             return []
@@ -78,7 +87,7 @@ class GoogleCalendarAuth:
         
         try:
             events_result = self.service.events().list(
-                calendarId='primary',
+                calendarId=calendar_id,
                 timeMin=start_time,
                 timeMax=end_time,
                 singleEvents=True,
