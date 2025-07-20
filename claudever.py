@@ -18,47 +18,40 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("SEINXCAL")
-        self.setFixedSize(1080, 720)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+        self.setWindowTitle("Login")
+        self.setFixedSize(400, 150)
+        self.calendar_id = None
+        self.credentials = None
+        self.user_email = None
         
         layout = QVBoxLayout()
         
-        # Logo/Title
-        title = QLabel("SEINXCAL")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 24px; font-weight: bold; margin: 20px;")
-        layout.addWidget(title)
+        # Calendar ID input
+        form_layout = QFormLayout()
+        self.calendar_id_input = QLineEdit()
+        self.calendar_id_input.setPlaceholderText("Enter your calendar ID")
+        form_layout.addRow("Calendar ID:", self.calendar_id_input)
+        layout.addLayout(form_layout)
         
-        # Instructions
-        instruction = QLabel("Click the button below to authenticate with Google Calendar")
-        instruction.setAlignment(Qt.AlignCenter)
-        instruction.setWordWrap(True)
-        layout.addWidget(instruction)
-        
-        # Login button
-        self.login_btn = QPushButton("Login with Google")
-        self.login_btn.setFixedSize(200, 40)
-        self.login_btn.clicked.connect(self.authenticate)
-        
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.login_btn)
-        btn_layout.addStretch()
-        
-        layout.addLayout(btn_layout)
-        layout.addStretch()
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.login)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
         
         self.setLayout(layout)
         
-    def authenticate(self):
+    def login(self):
+        self.calendar_id = self.calendar_id_input.text().strip()
+        if not self.calendar_id:
+            QMessageBox.warning(self, "Error", "Please enter a calendar ID")
+            return
+            
         try:
             creds = None
-            # The file token.json stores the user's access and refresh tokens.
             if os.path.exists('token.json'):
                 creds = Credentials.from_authorized_user_file('token.json', SCOPES)
             
-            # If there are no (valid) credentials available, let the user log in.
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
@@ -67,20 +60,20 @@ class LoginDialog(QDialog):
                         'credentials.json', SCOPES)
                     creds = flow.run_local_server(port=0)
                 
-                # Save the credentials for the next run
                 with open('token.json', 'w') as token:
                     token.write(creds.to_json())
             
-            # Test the connection
+            # Test the connection with provided calendar ID
             service = build('calendar', 'v3', credentials=creds)
-            profile = service.calendars().get(calendarId='primary').execute()
+            calendar = service.calendars().get(calendarId=self.calendar_id).execute()
             
-            self.user_email = profile.get('id', 'Unknown')
+            self.user_email = calendar.get('id', 'Unknown')
             self.credentials = creds
             self.accept()
             
         except Exception as e:
             QMessageBox.warning(self, "Authentication Error", f"Failed to authenticate: {str(e)}")
+            return
 
 class DateSearchDialog(QDialog):
     def __init__(self, parent=None):
@@ -317,18 +310,17 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.service = None
         self.user_email = ""
+        self.calendar_id = None
         self.current_date = datetime.now().date()
         self.theme = "light"
         self.language = "en"
         self.setGeometry(100, 100, 800, 600)
         self.setWindowIcon(QIcon('calendar-app-50.png'))
-        self.setWindowTitle(" ")
+        self.setWindowTitle("SEINXCAL")
         
         self.setup_ui()
         self.apply_theme()
-        
-        # Show login dialog
-        self.show_login()
+        self.user_label.setText("No connected account")
     
     def setup_ui(self):
         central_widget = QWidget()
@@ -423,11 +415,16 @@ class MainWindow(QMainWindow):
         theme_menu.addAction("Light", lambda: self.change_theme("light"))
         theme_menu.addAction("Dark", lambda: self.change_theme("dark"))
         
-        # Other options
-        menu.addAction("Search by Date", self.search_by_date)
-        menu.addAction("Add Event", self.add_event)
-        menu.addSeparator()
-        menu.addAction("Logout", self.logout)
+        if self.service:
+            # Show these options only when logged in
+            menu.addAction("Search by Date", self.search_by_date)
+            menu.addAction("Add Event", self.add_event)
+            menu.addSeparator()
+            menu.addAction("Logout", self.logout)
+        else:
+            # Show login option when not logged in
+            menu.addSeparator()
+            menu.addAction("Login", self.show_login)
         
         # Show menu at cog button position
         button_pos = self.cog_btn.mapToGlobal(self.cog_btn.rect().bottomLeft())
@@ -436,12 +433,11 @@ class MainWindow(QMainWindow):
     def show_login(self):
         login_dialog = LoginDialog(self)
         if login_dialog.exec_() == QDialog.Accepted:
+            self.calendar_id = login_dialog.calendar_id
             self.user_email = login_dialog.user_email
             self.service = build('calendar', 'v3', credentials=login_dialog.credentials)
             self.user_label.setText(self.user_email)
             self.load_events()
-        else:
-            sys.exit()
     
     def change_language(self, lang):
         self.language = lang
@@ -543,7 +539,7 @@ class MainWindow(QMainWindow):
     
     def get_events(self, start_time, end_time):
         events_result = self.service.events().list(
-            calendarId='primary',#Placeholder for calendar id that will be input at login
+            calendarId=self.calendar_id,
             timeMin=start_time.isoformat() + 'Z',
             timeMax=end_time.isoformat() + 'Z',
             singleEvents=True,
