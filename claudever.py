@@ -18,14 +18,14 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Google Calendar Login")
-        self.setFixedSize(400, 200)
+        self.setWindowTitle("SEINXCAL")
+        self.setFixedSize(1080, 720)
         self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
         
         layout = QVBoxLayout()
         
         # Logo/Title
-        title = QLabel("Google Calendar")
+        title = QLabel("SEINXCAL")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 24px; font-weight: bold; margin: 20px;")
         layout.addWidget(title)
@@ -167,7 +167,7 @@ class CalendarTable(QTableWidget):
         super().__init__(parent)
         self.parent_app = parent
         self.setColumnCount(5)
-        self.setHorizontalHeaderLabels(['Name', 'Location', 'Start Time', 'End Time', 'Remarks'])
+        self.setHorizontalHeaderLabels(['Name', 'Location', 'Start Date', 'End Date', 'Remarks'])
         self.event_data = {}  # Store event data by row
         
         # Set column widths
@@ -175,16 +175,16 @@ class CalendarTable(QTableWidget):
         header.setStretchLastSection(True)
         header.resizeSection(0, 200)
         header.resizeSection(1, 150)
-        header.resizeSection(2, 120)
-        header.resizeSection(3, 120)
+        header.resizeSection(2, 160)
+        header.resizeSection(3, 160)
         header.resizeSection(4, 250)
         
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setAlternatingRowColors(True)
         self.cellClicked.connect(self.handle_cell_click)
         
-        # Add some empty rows for adding new events
-        self.setRowCount(20)
+        #empty rows for adding new events
+        self.setRowCount(50)
         
         # Create actions widget
         self.actions_widget = None
@@ -229,7 +229,7 @@ class CalendarTable(QTableWidget):
                 
                 self.actions_widget = QWidget(self)
                 layout = QHBoxLayout(self.actions_widget)
-                layout.setSpacing(5)
+                layout.setSpacing(3)
                 layout.setContentsMargins(0, 0, 0, 0)
                 
                 # Edit button
@@ -239,8 +239,9 @@ class CalendarTable(QTableWidget):
                         background-color: #4CAF50;
                         color: white;
                         border: none;
-                        padding: 5px 10px;
-                        border-radius: 3px;
+                        padding: 3px 8px;
+                        border-radius: 2px;
+                        font-size: 11px;
                     }
                     QPushButton:hover {
                         background-color: #45a049;
@@ -256,8 +257,9 @@ class CalendarTable(QTableWidget):
                         background-color: #f44336;
                         color: white;
                         border: none;
-                        padding: 5px 10px;
-                        border-radius: 3px;
+                        padding: 3px 8px;
+                        border-radius: 2px;
+                        font-size: 11px;
                     }
                     QPushButton:hover {
                         background-color: #da190b;
@@ -269,10 +271,19 @@ class CalendarTable(QTableWidget):
                 layout.addWidget(edit_btn)
                 layout.addWidget(delete_btn)
                 
-                # Position the buttons container at the end of the row
-                rect = self.visualItemRect(self.item(row, 4))  # Get last column rect
-                self.actions_widget.setFixedSize(160, rect.height() - 2)
-                self.actions_widget.move(rect.right() - 165, rect.y() + 1)
+                # Position the buttons container in the remarks column
+                rect = self.visualItemRect(self.item(row, 4))  # Get remarks column rect
+                self.actions_widget.setFixedSize(160, rect.height()-2)
+                
+                # Calculate position to place buttons at the right side of the remarks cell
+                horizontal_pos = rect.x() + rect.width() - 165
+                vertical_pos = rect.y() - 1
+                
+                # Ensure buttons stay within the cell
+                if horizontal_pos < rect.x():
+                    horizontal_pos = rect.x() + 5  # Add small padding from left if cell is too small
+                
+                self.actions_widget.move(horizontal_pos, vertical_pos)
                 self.actions_widget.show()
         else:
             if self.actions_widget:
@@ -309,9 +320,9 @@ class MainWindow(QMainWindow):
         self.current_date = datetime.now().date()
         self.theme = "light"
         self.language = "en"
-        
-        self.setWindowTitle("Google Calendar Desktop")
-        self.setFixedSize(1080, 720)
+        self.setGeometry(100, 100, 800, 600)
+        self.setWindowIcon(QIcon('calendar-app-50.png'))
+        self.setWindowTitle(" ")
         
         self.setup_ui()
         self.apply_theme()
@@ -326,29 +337,36 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central_widget)
         
         # Top bar with cog icon
-        top_bar = self.create_top_bar()
-        layout.addWidget(top_bar)
+        #top_bar = self.create_top_bar()
+        #layout.addWidget(top_bar)
         
         # User info and date
         info_bar = self.create_info_bar()
         layout.addWidget(info_bar)
         
-        # Tab widget
-        self.tab_widget = QTabWidget()
+        tab_bar = self.create_tab_bar()
+        layout.addWidget(tab_bar)
         
+    def create_tab_bar(self):
+
+        # Tab widget
+        tab_widget = QTabWidget()
+        layout = QHBoxLayout(tab_widget) 
+
         # Today's events tab
         self.today_table = CalendarTable(self)
-        self.tab_widget.addTab(self.today_table, "Today's Events")
+        tab_widget.addTab(self.today_table, "Today's Events")
         
         # Past events tab
         self.past_table = CalendarTable(self)
-        self.tab_widget.addTab(self.past_table, "Past Events")
+        tab_widget.addTab(self.past_table, "Past Events")
         
         # Upcoming events tab
         self.upcoming_table = CalendarTable(self)
-        self.tab_widget.addTab(self.upcoming_table, "Upcoming Events")
+        tab_widget.addTab(self.upcoming_table, "Upcoming Events")
         
-        layout.addWidget(self.tab_widget)
+        #layout.addWidget(self.tab_widget)
+        return tab_widget 
     
     def create_top_bar(self):
         top_bar = QWidget()
@@ -369,6 +387,12 @@ class MainWindow(QMainWindow):
         info_bar = QWidget()
         layout = QHBoxLayout(info_bar)
         
+        # COG icon (left)
+        self.cog_btn = QPushButton("⚙")
+        self.cog_btn.setFixedSize(40, 40)
+        self.cog_btn.setStyleSheet("font-size: 16px; border: none; padding: 5px;")
+        self.cog_btn.clicked.connect(self.show_settings_menu)
+
         # User email (center)
         self.user_label = QLabel("Not logged in")
         self.user_label.setAlignment(Qt.AlignCenter)
@@ -376,8 +400,9 @@ class MainWindow(QMainWindow):
         
         # Date (right)
         self.date_label = QLabel(self.current_date.strftime("%Y-%m-%d"))
-        self.date_label.setStyleSheet("font-size: 16px;")
+        self.date_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         
+        layout.addWidget(self.cog_btn)
         layout.addStretch()
         layout.addWidget(self.user_label)
         layout.addStretch()
@@ -420,7 +445,8 @@ class MainWindow(QMainWindow):
     
     def change_language(self, lang):
         self.language = lang
-        # Here you would implement language switching logic
+        #language switching logic
+
         QMessageBox.information(self, "Language", f"Language changed to {lang}")
     
     def change_theme(self, theme):
@@ -517,7 +543,7 @@ class MainWindow(QMainWindow):
     
     def get_events(self, start_time, end_time):
         events_result = self.service.events().list(
-            calendarId='primary',
+            calendarId='primary',#Placeholder for calendar id that will be input at login
             timeMin=start_time.isoformat() + 'Z',
             timeMax=end_time.isoformat() + 'Z',
             singleEvents=True,
@@ -534,7 +560,8 @@ class MainWindow(QMainWindow):
         table.event_data = {}  # Clear existing event data
         
         # Set new row count
-        table.setRowCount(len(events) + 10)  # Extra rows for new events
+        table.setRowCount(len(events) + 20)  # Extra rows for new events
+
         
         # Filter out any deleted events
         active_events = [event for event in events if not event.get('status') == 'cancelled']
@@ -546,15 +573,17 @@ class MainWindow(QMainWindow):
             # Parse datetime strings
             if 'T' in start:
                 start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                start_str = start_dt.strftime("%H:%M")
+                start_str = start_dt.strftime("%Y-%m-%d %H:%M")
             else:
-                start_str = "All day"
+                start_dt = datetime.fromisoformat(start)
+                start_str = f"{start_dt.strftime('%Y-%m-%d')} (All day)"
             
             if 'T' in end:
                 end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                end_str = end_dt.strftime("%H:%M")
+                end_str = end_dt.strftime("%Y-%m-%d %H:%M")
             else:
-                end_str = "All day"
+                end_dt = datetime.fromisoformat(end)
+                end_str = f"{end_dt.strftime('%Y-%m-%d')} (All day)"
             
             # Create new items for each cell
             table.setItem(i, 0, QTableWidgetItem(event.get('summary', 'No Title')))
@@ -638,7 +667,7 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')  # Modern look
+    app.setStyle('Fusion')
     
     window = MainWindow()
     window.show()

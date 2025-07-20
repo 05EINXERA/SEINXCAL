@@ -2,3 +2,7 @@ seinxenv/
 credentials.json
 token.json
 myenv/
+output/
+*.ico
+*.png
+*.jpg
