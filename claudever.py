@@ -339,6 +339,9 @@ class MainWindow(QMainWindow):
         tab_bar = self.create_tab_bar()
         layout.addWidget(tab_bar)
         
+        # Start with empty tables when not logged in
+        self.clear_tables()
+        
     def create_tab_bar(self):
 
         # Tab widget
@@ -555,6 +558,11 @@ class MainWindow(QMainWindow):
         table.clearContents()
         table.event_data = {}  # Clear existing event data
         
+        # Only show rows if logged in
+        if not self.service:
+            table.setRowCount(0)
+            return
+            
         # Set new row count
         table.setRowCount(len(events) + 20)  # Extra rows for new events
 
@@ -597,7 +605,19 @@ class MainWindow(QMainWindow):
     def logout(self):
         if os.path.exists('token.json'):
             os.remove('token.json')
-        self.close()
+        self.service = None
+        self.user_email = ""
+        self.calendar_id = None
+        self.user_label.setText("No connected account")
+        self.clear_tables()
+        self.load_events()  # This will respect the logged-out state
+    
+    def clear_tables(self):
+        # Clear and hide rows in all tables when logged out
+        for table in [self.today_table, self.past_table, self.upcoming_table]:
+            table.clearContents()
+            table.setRowCount(0)  # Set to 0 rows when logged out
+            table.event_data = {}
     
     def update_event(self, event_data):
         dialog = UpdateEventDialog(event_data, self)
