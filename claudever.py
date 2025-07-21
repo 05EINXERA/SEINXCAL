@@ -183,6 +183,7 @@ class CalendarTable(QTableWidget):
         
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setAlternatingRowColors(True)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)  # Disable editing
         self.cellClicked.connect(self.handle_cell_click)
         
         #empty rows for adding new events
