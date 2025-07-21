@@ -1,6 +1,8 @@
 import sys
 import json
 import os
+import speech_recognition as sr
+import threading
 from datetime import datetime, timedelta
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
@@ -14,6 +16,88 @@ from googleapiclient.errors import HttpError
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+class ListeningOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet("background-color: rgba(0, 0, 0, 0.7);")
+        
+        layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignCenter)
+        
+        # Animated dots for visual feedback
+        self.label = QLabel("Listening")
+        self.label.setStyleSheet("color: white; font-size: 24px; background-color: transparent;")
+        layout.addWidget(self.label, alignment=Qt.AlignCenter)
+        
+        self.setLayout(layout)
+        self.dots = 0
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_dots)
+        self.timer.start(500)
+    
+    def update_dots(self):
+        self.dots = (self.dots + 1) % 4
+        self.label.setText("Listening" + "." * self.dots)
+    
+    def showEvent(self, event):
+        if self.parent():
+            self.resize(self.parent().size())
+            self.move(self.parent().mapToGlobal(QPoint(0, 0)))
+        super().showEvent(event)
+
+class SpeechToTextWidget(QWidget):
+    textCaptured = pyqtSignal(str)
+    
+    def __init__(self, parent=None, target_field=None):
+        super().__init__(parent)
+        self.target_field = target_field
+        self.recognizer = sr.Recognizer()
+        
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.mic_button = QPushButton()
+        self.mic_button.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+        self.mic_button.setFixedSize(24, 24)
+        self.mic_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 12px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        self.mic_button.clicked.connect(self.start_listening)
+        
+        layout.addWidget(self.mic_button)
+        self.setLayout(layout)
+        
+        self.overlay = ListeningOverlay(self.window())
+        self.overlay.hide()
+    
+    def start_listening(self):
+        self.overlay.show()
+        threading.Thread(target=self.listen_and_convert, daemon=True).start()
+    
+    def listen_and_convert(self):
+        with sr.Microphone() as source:
+            try:
+                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
+                text = self.recognizer.recognize_google(audio)
+                self.textCaptured.emit(text)
+            except sr.UnknownValueError:
+                self.textCaptured.emit("")
+            except Exception as e:
+                print(f"Error in speech recognition: {str(e)}")
+                self.textCaptured.emit("")
+            finally:
+                QMetaObject.invokeMethod(self.overlay, "hide", Qt.QueuedConnection)
 
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
@@ -109,15 +193,31 @@ class AddEventDialog(QDialog):
         
         layout = QVBoxLayout()
         
-        # Event name
-        layout.addWidget(QLabel("Event Name:"))
+        # Event name with speech input
+        name_container = QWidget()
+        name_layout = QHBoxLayout(name_container)
+        name_layout.setContentsMargins(0, 0, 0, 0)
+        name_label = QLabel("Event Name:")
         self.name_edit = QLineEdit()
-        layout.addWidget(self.name_edit)
+        self.name_speech = SpeechToTextWidget(target_field=self.name_edit)
+        self.name_speech.textCaptured.connect(lambda text: self.name_edit.setText(text))
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self.name_edit)
+        name_layout.addWidget(self.name_speech)
+        layout.addWidget(name_container)
         
-        # Location
-        layout.addWidget(QLabel("Location:"))
+        # Location with speech input
+        location_container = QWidget()
+        location_layout = QHBoxLayout(location_container)
+        location_layout.setContentsMargins(0, 0, 0, 0)
+        location_label = QLabel("Location:")
         self.location_edit = QLineEdit()
-        layout.addWidget(self.location_edit)
+        self.location_speech = SpeechToTextWidget(target_field=self.location_edit)
+        self.location_speech.textCaptured.connect(lambda text: self.location_edit.setText(text))
+        location_layout.addWidget(location_label)
+        location_layout.addWidget(self.location_edit)
+        location_layout.addWidget(self.location_speech)
+        layout.addWidget(location_container)
         
         # All Day checkbox
         self.all_day_check = QCheckBox("All Day Event")
@@ -139,11 +239,19 @@ class AddEventDialog(QDialog):
         self.end_datetime.setCalendarPopup(True)
         layout.addWidget(self.end_datetime)
         
-        # Remarks
-        layout.addWidget(QLabel("Remarks:"))
+        # Remarks with speech input
+        remarks_container = QWidget()
+        remarks_layout = QHBoxLayout(remarks_container)
+        remarks_layout.setContentsMargins(0, 0, 0, 0)
+        remarks_label = QLabel("Remarks:")
         self.remarks_edit = QTextEdit()
         self.remarks_edit.setMaximumHeight(60)
-        layout.addWidget(self.remarks_edit)
+        self.remarks_speech = SpeechToTextWidget(target_field=self.remarks_edit)
+        self.remarks_speech.textCaptured.connect(lambda text: self.remarks_edit.append(text))
+        remarks_layout.addWidget(remarks_label)
+        remarks_layout.addWidget(self.remarks_edit)
+        remarks_layout.addWidget(self.remarks_speech, alignment=Qt.AlignTop)
+        layout.addWidget(remarks_container)
         
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
