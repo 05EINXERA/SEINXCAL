@@ -163,14 +163,23 @@ class CalendarTable(QTableWidget):
         self.setHorizontalHeaderLabels(['Name', 'Location', 'Start Date', 'End Date', 'Remarks'])
         self.event_data = {}  # Store event data by row
         
-        # Set column widths
+        # Make table responsive
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        # Set relative column widths
         header = self.horizontalHeader()
-        header.setStretchLastSection(True)
-        header.resizeSection(0, 200)
-        header.resizeSection(1, 150)
-        header.resizeSection(2, 160)
-        header.resizeSection(3, 160)
-        header.resizeSection(4, 250)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Name
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Location
+        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Start Date
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # End Date
+        header.setSectionResizeMode(4, QHeaderView.Stretch)     # Remarks
+        
+        # Set minimum section sizes
+        self.setColumnWidth(0, 200)  # Name
+        self.setColumnWidth(1, 150)  # Location
+        self.setColumnWidth(2, 160)  # Start Date
+        self.setColumnWidth(3, 160)  # End Date
         
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setAlternatingRowColors(True)
@@ -314,7 +323,17 @@ class MainWindow(QMainWindow):
         self.current_date = datetime.now().date()
         self.theme = "light"
         self.language = "en"
-        self.setGeometry(100, 100, 800, 600)
+        
+        # Set minimum size and get screen geometry
+        self.setMinimumSize(1000, 600)
+        screen = QDesktopWidget().availableGeometry()
+        width = int(screen.width() * 0.8)  # 80% of screen width
+        height = int(screen.height() * 0.8)  # 80% of screen height
+        
+        # Set size and center the window
+        self.resize(width, height)
+        self.move((screen.width() - width) // 2, (screen.height() - height) // 2)
+        
         self.setWindowIcon(QIcon('calendar-app-50.png'))
         self.setWindowTitle("SEINXCAL")
         
@@ -332,17 +351,17 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout(central_widget)
-        
-        # Top bar with cog icon
-        #top_bar = self.create_top_bar()
-        #layout.addWidget(top_bar)
+        layout.setSpacing(10)  # Add spacing between widgets
+        layout.setContentsMargins(10, 10, 10, 10)  # Add margins
         
         # User info and date
         info_bar = self.create_info_bar()
         layout.addWidget(info_bar)
         
+        # Tab widget that expands to fill space
         tab_bar = self.create_tab_bar()
-        layout.addWidget(tab_bar)
+        tab_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(tab_bar, 1)  # The 1 gives it a stretch factor
         
         # Start with empty tables when not logged in
         self.clear_tables()
