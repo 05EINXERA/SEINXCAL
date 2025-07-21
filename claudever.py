@@ -508,7 +508,7 @@ class MainWindow(QMainWindow):
                 },
             }
             
-            event = self.service.events().insert(calendarId='primary', body=event).execute()
+            event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
             QMessageBox.information(self, "Success", "Event created successfully!")
             self.load_events()
             
