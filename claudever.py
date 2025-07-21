@@ -367,25 +367,76 @@ class MainWindow(QMainWindow):
         self.clear_tables()
         
     def create_tab_bar(self):
-
-        # Tab widget
-        tab_widget = QTabWidget()
-        layout = QHBoxLayout(tab_widget) 
-
-        # Today's events tab
-        self.today_table = CalendarTable(self)
-        tab_widget.addTab(self.today_table, "Today's Events")
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Past events tab
+        # Button container with center alignment
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 20)  # Add bottom margin
+        
+        # Create styled buttons
+        self.past_button = QPushButton("Past Events")
+        self.today_button = QPushButton("Today & Upcoming")
+        
+        # Style the buttons
+        button_style = """
+            QPushButton {
+                padding: 10px 20px;
+                font-size: 14px;
+                border-radius: 15px;
+                border: none;
+                min-width: 150px;
+            }
+            QPushButton:checked {
+                background-color: #4CAF50;
+                color: white;
+            }
+            QPushButton:!checked {
+                background-color: #e0e0e0;
+                color: #333;
+            }
+        """
+        self.past_button.setStyleSheet(button_style)
+        self.today_button.setStyleSheet(button_style)
+        
+        # Make buttons checkable and exclusive
+        self.past_button.setCheckable(True)
+        self.today_button.setCheckable(True)
+        button_group = QButtonGroup(self)
+        button_group.addButton(self.past_button)
+        button_group.addButton(self.today_button)
+        
+        # Center the buttons
+        button_layout.addStretch()
+        button_layout.addWidget(self.past_button)
+        button_layout.addSpacing(20)  # Space between buttons
+        button_layout.addWidget(self.today_button)
+        button_layout.addStretch()
+        
+        # Create stacked widget for tables
+        self.stack = QStackedWidget()
+        
+        # Create tables
         self.past_table = CalendarTable(self)
-        tab_widget.addTab(self.past_table, "Past Events")
+        self.today_table = CalendarTable(self)
         
-        # Upcoming events tab
-        self.upcoming_table = CalendarTable(self)
-        tab_widget.addTab(self.upcoming_table, "Upcoming Events")
+        # Add tables to stack
+        self.stack.addWidget(self.past_table)
+        self.stack.addWidget(self.today_table)
         
-        #layout.addWidget(self.tab_widget)
-        return tab_widget 
+        # Connect buttons to switch stacks
+        self.past_button.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        self.today_button.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        
+        # Set default selected button
+        self.today_button.setChecked(True)
+        
+        main_layout.addWidget(button_container)
+        main_layout.addWidget(self.stack)
+        
+        return container
     
     def create_top_bar(self):
         top_bar = QWidget()
@@ -551,17 +602,18 @@ class MainWindow(QMainWindow):
             today_end = datetime.combine(self.current_date, datetime.max.time())
             
             today_events = self.get_events(today_start, today_end)
-            self.populate_table(self.today_table, today_events)
+            
+            # Get upcoming events (next 30 days)
+            upcoming_end = today_end + timedelta(days=30)
+            upcoming_events = self.get_events(today_end, upcoming_end)
+            
+            # Populate today's table with both today's and upcoming events
+            self.populate_table(self.today_table, today_events, upcoming_events)
             
             # Get past events (last 30 days)
             past_start = today_start - timedelta(days=30)
             past_events = self.get_events(past_start, today_start)
             self.populate_table(self.past_table, past_events)
-            
-            # Get upcoming events (next 30 days)
-            upcoming_end = today_end + timedelta(days=30)
-            upcoming_events = self.get_events(today_end, upcoming_end)
-            self.populate_table(self.upcoming_table, upcoming_events)
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load events: {str(e)}")
@@ -579,7 +631,7 @@ class MainWindow(QMainWindow):
         
         return events_result.get('items', [])
     
-    def populate_table(self, table, events):
+    def populate_table(self, table, events, upcoming_events=None):
         # Clear the table completely
         table.clearContents()
         table.event_data = {}  # Clear existing event data
@@ -588,10 +640,15 @@ class MainWindow(QMainWindow):
         if not self.service:
             table.setRowCount(0)
             return
-            
-        # Set new row count
-        table.setRowCount(len(events) + 20)  # Extra rows for new events
-
+        
+        # Calculate total rows needed
+        total_rows = len(events)
+        if upcoming_events:
+            # Add 1 for separator and the length of upcoming events
+            total_rows += len(upcoming_events) + 1
+        
+        # Set new row count (add extra rows for new events)
+        table.setRowCount(total_rows + 20)
         
         # Filter out any deleted events
         active_events = [event for event in events if not event.get('status') == 'cancelled']
@@ -624,6 +681,51 @@ class MainWindow(QMainWindow):
             
             # Store event data for this row
             table.event_data[i] = event
+            
+        current_row = len(active_events)
+        
+        # If we have upcoming events, add them after a separator
+        if upcoming_events:
+            # Add separator row
+            separator_item = QTableWidgetItem("Upcoming Events")
+            separator_item.setBackground(QColor("#f0f0f0"))
+            separator_item.setFont(QFont("Arial", 10, QFont.Bold))
+            table.setItem(current_row, 0, separator_item)
+            for col in range(1, 5):
+                item = QTableWidgetItem("")
+                item.setBackground(QColor("#f0f0f0"))
+                table.setItem(current_row, col, item)
+            
+            current_row += 1
+            
+            # Add upcoming events
+            upcoming_active = [event for event in upcoming_events if not event.get('status') == 'cancelled']
+            for event in upcoming_active:
+                start = event['start'].get('dateTime', event['start'].get('date'))
+                end = event['end'].get('dateTime', event['end'].get('date'))
+                
+                if 'T' in start:
+                    start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                    start_str = start_dt.strftime("%Y-%m-%d %H:%M")
+                else:
+                    start_dt = datetime.fromisoformat(start)
+                    start_str = f"{start_dt.strftime('%Y-%m-%d')} (All day)"
+                
+                if 'T' in end:
+                    end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                    end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+                else:
+                    end_dt = datetime.fromisoformat(end)
+                    end_str = f"{end_dt.strftime('%Y-%m-%d')} (All day)"
+                
+                table.setItem(current_row, 0, QTableWidgetItem(event.get('summary', 'No Title')))
+                table.setItem(current_row, 1, QTableWidgetItem(event.get('location', '')))
+                table.setItem(current_row, 2, QTableWidgetItem(start_str))
+                table.setItem(current_row, 3, QTableWidgetItem(end_str))
+                table.setItem(current_row, 4, QTableWidgetItem(event.get('description', '')))
+                
+                table.event_data[current_row] = event
+                current_row += 1
         
         # Refresh the table
         table.viewport().update()
@@ -643,7 +745,7 @@ class MainWindow(QMainWindow):
     
     def clear_tables(self):
         # Clear and hide rows in all tables when logged out
-        for table in [self.today_table, self.past_table, self.upcoming_table]:
+        for table in [self.today_table, self.past_table]:
             table.clearContents()
             table.setRowCount(0)  # Set to 0 rows when logged out
             table.event_data = {}
