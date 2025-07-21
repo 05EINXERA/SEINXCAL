@@ -307,13 +307,31 @@ class UpdateEventDialog(AddEventDialog):
         start = event_data['start'].get('dateTime', event_data['start'].get('date'))
         end = event_data['end'].get('dateTime', event_data['end'].get('date'))
         
+        # Handle both datetime and date-only formats
         if 'T' in start:
+            # Has time component
             start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-            self.start_datetime.setDateTime(QDateTime.fromSecsSinceEpoch(int(start_dt.timestamp())))
+        else:
+            # Date only - use start of day
+            start_dt = datetime.fromisoformat(start)
         
         if 'T' in end:
+            # Has time component
             end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-            self.end_datetime.setDateTime(QDateTime.fromSecsSinceEpoch(int(end_dt.timestamp())))
+        else:
+            # Date only - use end of day
+            end_dt = datetime.fromisoformat(end)
+        
+        # Convert to local time and set in the dialog
+        self.start_datetime.setDateTime(QDateTime(
+            QDate(start_dt.year, start_dt.month, start_dt.day),
+            QTime(start_dt.hour, start_dt.minute)
+        ))
+        
+        self.end_datetime.setDateTime(QDateTime(
+            QDate(end_dt.year, end_dt.month, end_dt.day),
+            QTime(end_dt.hour, end_dt.minute)
+        ))
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -431,8 +449,9 @@ class MainWindow(QMainWindow):
         self.past_button.clicked.connect(lambda: self.stack.setCurrentIndex(0))
         self.today_button.clicked.connect(lambda: self.stack.setCurrentIndex(1))
         
-        # Set default selected button
+        # Set default to Today & Upcoming
         self.today_button.setChecked(True)
+        self.stack.setCurrentIndex(1)  # Ensure today's view is shown by default
         
         main_layout.addWidget(button_container)
         main_layout.addWidget(self.stack)
