@@ -687,15 +687,20 @@ class MainWindow(QMainWindow):
         
         # If we have upcoming events, add them after a separator
         if upcoming_events:
+            # Add empty row before separator
+            for col in range(5):
+                empty_item = QTableWidgetItem("")
+                table.setItem(current_row, col, empty_item)
+            current_row += 1
+            
             # Add separator row
             separator_item = QTableWidgetItem("Upcoming Events")
             separator_item.setBackground(QColor("#f0f0f0"))
             separator_item.setFont(QFont("Arial", 10, QFont.Bold))
+            separator_item.setTextAlignment(Qt.AlignCenter)  # Center the text
             table.setItem(current_row, 0, separator_item)
-            for col in range(1, 5):
-                item = QTableWidgetItem("")
-                item.setBackground(QColor("#f0f0f0"))
-                table.setItem(current_row, col, item)
+            table.setSpan(current_row, 0, 1, 5)  # Merge all columns for the separator row
+            separator_item.setFlags(separator_item.flags() & ~Qt.ItemIsEditable)  # Make it non-editable
             
             current_row += 1
             
