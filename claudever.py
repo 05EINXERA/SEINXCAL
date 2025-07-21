@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
         
         # Create styled buttons
         self.past_button = QPushButton("Past Events")
-        self.today_button = QPushButton("Today & Upcoming")
+        self.today_button = QPushButton("Today's Events")
         
         # Style the buttons
         button_style = """
