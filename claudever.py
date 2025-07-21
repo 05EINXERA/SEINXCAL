@@ -318,6 +318,11 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon('calendar-app-50.png'))
         self.setWindowTitle("SEINXCAL")
         
+        # Setup auto-refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.load_events)
+        self.refresh_timer.setInterval(30000)  # 30 seconds
+        
         self.setup_ui()
         self.apply_theme()
         self.user_label.setText("No connected account")
@@ -441,6 +446,8 @@ class MainWindow(QMainWindow):
             self.service = build('calendar', 'v3', credentials=login_dialog.credentials)
             self.user_label.setText(self.user_email)
             self.load_events()
+            # Start the auto-refresh timer
+            self.refresh_timer.start()
     
     def change_language(self, lang):
         self.language = lang
@@ -603,6 +610,9 @@ class MainWindow(QMainWindow):
         table.viewport().update()
     
     def logout(self):
+        # Stop the auto-refresh timer
+        self.refresh_timer.stop()
+        
         if os.path.exists('token.json'):
             os.remove('token.json')
         self.service = None
