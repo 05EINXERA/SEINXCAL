@@ -1,4 +1,10 @@
 import sys
+import qtawesome as qta
+import json
+import os
+import speech_recognition as sr
+import threading
+import sys
 import json
 import os
 import speech_recognition as sr
@@ -20,16 +26,39 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 class ListeningOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        # Make it a popup that stays on top
+        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 0.7);")
+        
+        # Create semi-transparent dark background
+        self.setStyleSheet("""
+            ListeningOverlay {
+                background-color: rgba(0, 0, 0, 0.7);
+                border-radius: 10px;
+            }
+        """)
         
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(10)
+        
+        # Add microphone icon
+        mic_label = QLabel()
+        mic_icon = qta.icon('fa5s.microphone', color='white')
+        mic_label.setPixmap(mic_icon.pixmap(32, 32))
+        layout.addWidget(mic_label, alignment=Qt.AlignCenter)
         
         # Animated dots for visual feedback
         self.label = QLabel("Listening")
-        self.label.setStyleSheet("color: white; font-size: 24px; background-color: transparent;")
+        self.label.setStyleSheet("""
+            QLabel {
+                color: black;
+                font-size: 18px;
+                font-weight: bold;
+                background-color: transparent;
+                padding: 10px;
+            }
+        """)
         layout.addWidget(self.label, alignment=Qt.AlignCenter)
         
         self.setLayout(layout)
@@ -37,6 +66,9 @@ class ListeningOverlay(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_dots)
         self.timer.start(500)
+        
+        # Set fixed size for the overlay
+        self.setFixedSize(200, 150)
     
     def update_dots(self):
         self.dots = (self.dots + 1) % 4
@@ -44,8 +76,11 @@ class ListeningOverlay(QWidget):
     
     def showEvent(self, event):
         if self.parent():
-            self.resize(self.parent().size())
-            self.move(self.parent().mapToGlobal(QPoint(0, 0)))
+            # Center the overlay on the parent widget
+            parent_rect = self.parent().rect()
+            parent_center = self.parent().mapToGlobal(parent_rect.center())
+            self.move(parent_center.x() - self.width() // 2,
+                     parent_center.y() - self.height() // 2)
         super().showEvent(event)
 
 class SpeechToTextWidget(QWidget):
@@ -60,7 +95,7 @@ class SpeechToTextWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         
         self.mic_button = QPushButton()
-        self.mic_button.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+        self.mic_button.setIcon(qta.icon('fa5s.microphone'))
         self.mic_button.setFixedSize(24, 24)
         self.mic_button.setStyleSheet("""
             QPushButton {
