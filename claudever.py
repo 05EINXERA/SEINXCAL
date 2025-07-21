@@ -105,7 +105,7 @@ class AddEventDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Event")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 320)
         
         layout = QVBoxLayout()
         
@@ -119,11 +119,17 @@ class AddEventDialog(QDialog):
         self.location_edit = QLineEdit()
         layout.addWidget(self.location_edit)
         
+        # All Day checkbox
+        self.all_day_check = QCheckBox("All Day Event")
+        self.all_day_check.stateChanged.connect(self.on_all_day_changed)
+        layout.addWidget(self.all_day_check)
+        
         # Start date/time
         layout.addWidget(QLabel("Start Date & Time:"))
         self.start_datetime = QDateTimeEdit()
         self.start_datetime.setDateTime(QDateTime.currentDateTime())
         self.start_datetime.setCalendarPopup(True)
+        self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
         layout.addWidget(self.start_datetime)
         
         # End date/time
@@ -146,13 +152,53 @@ class AddEventDialog(QDialog):
         
         self.setLayout(layout)
     
+    def setup_datetime_section(self, date_edit, label, show_time=True):
+        # Create a horizontal layout for the date/time section
+        section_layout = QHBoxLayout()
+        section_layout.addWidget(QLabel(label))
+        
+        # Add date edit
+        self.date_part = QDateEdit(date_edit)
+        self.date_part.setCalendarPopup(True)
+        section_layout.addWidget(self.date_part)
+        
+        # Add time edit
+        if show_time:
+            self.time_part = QTimeEdit(date_edit)
+            section_layout.addWidget(self.time_part)
+        
+        return section_layout
+
+    def on_all_day_changed(self, state):
+        # Store current times before changing format
+        start_time = self.start_datetime.time()
+        end_time = self.end_datetime.time()
+        
+        # Change display format based on all-day status
+        self.start_datetime.setDisplayFormat("yyyy-MM-dd" if state else "yyyy-MM-dd HH:mm")
+        self.end_datetime.setDisplayFormat("yyyy-MM-dd" if state else "yyyy-MM-dd HH:mm")
+        
+        if state:
+            # For all-day events, set times to start and end of day
+            self.start_datetime.setTime(QTime(0, 0))
+            self.end_datetime.setTime(QTime(23, 59))
+        else:
+            # Restore previous times when switching back to non-all-day
+            self.start_datetime.setTime(start_time)
+            self.end_datetime.setTime(end_time)
+    
     def get_event_data(self):
+        is_all_day = self.all_day_check.isChecked()
+        start_dt = self.start_datetime.dateTime().toPyDateTime()
+        end_dt = self.end_datetime.dateTime().toPyDateTime()
+        
         return {
             'name': self.name_edit.text(),
             'location': self.location_edit.text(),
-            'start': self.start_datetime.dateTime().toPyDateTime(),
-            'end': self.end_datetime.dateTime().toPyDateTime(),
-            'remarks': self.remarks_edit.toPlainText()
+            'start': start_dt.date() if is_all_day else start_dt,
+            'end': end_dt.date() if is_all_day else end_dt,
+            'remarks': self.remarks_edit.toPlainText(),
+            'is_all_day': is_all_day
         }
 
 class CalendarTable(QTableWidget):
@@ -165,9 +211,11 @@ class CalendarTable(QTableWidget):
         
         # Make table responsive
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         
-        # Set relative column widths
+        # Add resize event handler to maintain proportions
+        self.viewport().installEventFilter(self)
+        
+        # Set relative column widths with proportional sizes
         header = self.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Interactive)  # Name
         header.setSectionResizeMode(1, QHeaderView.Interactive)  # Location
@@ -175,16 +223,18 @@ class CalendarTable(QTableWidget):
         header.setSectionResizeMode(3, QHeaderView.Interactive)  # End Date
         header.setSectionResizeMode(4, QHeaderView.Stretch)     # Remarks
         
-        # Set minimum section sizes
-        self.setColumnWidth(0, 200)  # Name
-        self.setColumnWidth(1, 150)  # Location
-        self.setColumnWidth(2, 160)  # Start Date
-        self.setColumnWidth(3, 160)  # End Date
+        # Set proportional widths (total should be less than viewport width)
+        total_width = self.viewport().width()
+        self.setColumnWidth(0, int(total_width * 0.25))  # Name - 22%
+        self.setColumnWidth(1, int(total_width * 0.25))  # Location - 15%
+        self.setColumnWidth(2, int(total_width * 0.18))  # Start Date - 18%
+        self.setColumnWidth(3, int(total_width * 0.18))  # End Date - 18%
+        # Remarks gets remaining ~27% automatically due to Stretch mode
         
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setAlternatingRowColors(True)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)  # Disable editing
-        self.cellClicked.connect(self.handle_cell_click)
+        self.cellClicked.connect(self.handle_event_cell_click)
         
         #empty rows for adding new events
         self.setRowCount(50)
@@ -192,10 +242,61 @@ class CalendarTable(QTableWidget):
         # Create actions widget
         self.actions_widget = None
     
-    def handle_cell_click(self, row, column):
-        if self.item(row, 0) is None or self.item(row, 0).text() == "":
-            # Empty row clicked - add new event
+    def handle_event_cell_click(self, row, column):
+        # Only show actions for event rows (not empty, not separator)
+        item = self.item(row, 0)
+        if item is None or item.text() == "":
             self.parent_app.add_event()
+            return
+        # Don't show for separator row
+        if item.text() == "Upcoming Events":
+            return
+        if self.actions_widget:
+            self.actions_widget.hide()
+            self.actions_widget.deleteLater()
+        self.show_actions_widget(row)
+        # Enable mouse tracking to detect when cursor leaves the row
+        self.setMouseTracking(True)
+
+    def show_actions_widget(self, row):
+        event_data = self.event_data.get(row)
+        if not event_data:
+            return
+        self.actions_widget = QWidget(self)
+        layout = QHBoxLayout(self.actions_widget)
+        layout.setSpacing(3)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Edit button with icon
+        edit_btn = QPushButton(self.actions_widget)
+        edit_icon = QIcon.fromTheme("edit", QIcon("icons/edit.png"))
+        edit_btn.setIcon(edit_icon)
+        edit_btn.setToolTip("Edit")
+        edit_btn.setStyleSheet("border: none; background: transparent;")
+        edit_btn.setCursor(Qt.PointingHandCursor)
+        edit_btn.clicked.connect(lambda: self.parent_app.update_event(event_data))
+
+        # Delete button with icon
+        delete_btn = QPushButton(self.actions_widget)
+        delete_icon = QIcon.fromTheme("delete", QIcon("icons/delete.png"))
+        delete_btn.setIcon(delete_icon)
+        delete_btn.setToolTip("Delete")
+        delete_btn.setStyleSheet("border: none; background: transparent;")
+        delete_btn.setCursor(Qt.PointingHandCursor)
+        delete_btn.clicked.connect(lambda: self.parent_app.delete_event(event_data))
+
+        layout.addWidget(edit_btn)
+        layout.addWidget(delete_btn)
+
+        # Position the buttons container in the remarks column
+        rect = self.visualItemRect(self.item(row, 4))
+        self.actions_widget.setFixedSize(60, rect.height()-2)
+        horizontal_pos = rect.x() + rect.width() - 65
+        vertical_pos = rect.y() - 1
+        if horizontal_pos < rect.x():
+            horizontal_pos = rect.x() + 5
+        self.actions_widget.move(horizontal_pos, vertical_pos)
+        self.actions_widget.show()
     
     def show_actions_menu(self, row, event_data):
         menu = QMenu(self)
@@ -208,90 +309,36 @@ class CalendarTable(QTableWidget):
         # Show menu at mouse position
         menu.exec_(QCursor.pos())
     
-    def enterEvent(self, event):
-        self.setMouseTracking(True)
-        super().enterEvent(event)
-    
     def leaveEvent(self, event):
+        # When mouse leaves the table completely, disable tracking and hide actions
         self.setMouseTracking(False)
-        super().leaveEvent(event)
         if self.actions_widget:
-            self.actions_widget.hide()
-    
-    def mouseMoveEvent(self, event):
-        row = self.rowAt(event.y())
-        if row >= 0 and self.item(row, 0) and self.item(row, 0).text():
-            self.selectRow(row)
-            
-            # Show actions for the row
-            if self.event_data.get(row):
-                # Create container widget for buttons
-                if self.actions_widget:
-                    self.actions_widget.hide()
-                    self.actions_widget.deleteLater()
-                
-                self.actions_widget = QWidget(self)
-                layout = QHBoxLayout(self.actions_widget)
-                layout.setSpacing(3)
-                layout.setContentsMargins(0, 0, 0, 0)
-                
-                # Edit button
-                edit_btn = QPushButton("Edit", self.actions_widget)
-                edit_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #4CAF50;
-                        color: white;
-                        border: none;
-                        padding: 3px 8px;
-                        border-radius: 2px;
-                        font-size: 11px;
-                    }
-                    QPushButton:hover {
-                        background-color: #45a049;
-                    }
-                """)
-                edit_btn.setCursor(Qt.PointingHandCursor)
-                edit_btn.clicked.connect(lambda: self.parent_app.update_event(self.event_data[row]))
-                
-                # Delete button
-                delete_btn = QPushButton("Delete", self.actions_widget)
-                delete_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #f44336;
-                        color: white;
-                        border: none;
-                        padding: 3px 8px;
-                        border-radius: 2px;
-                        font-size: 11px;
-                    }
-                    QPushButton:hover {
-                        background-color: #da190b;
-                    }
-                """)
-                delete_btn.setCursor(Qt.PointingHandCursor)
-                delete_btn.clicked.connect(lambda: self.parent_app.delete_event(self.event_data[row]))
-                
-                layout.addWidget(edit_btn)
-                layout.addWidget(delete_btn)
-                
-                # Position the buttons container in the remarks column
-                rect = self.visualItemRect(self.item(row, 4))  # Get remarks column rect
-                self.actions_widget.setFixedSize(160, rect.height()-2)
-                
-                # Calculate position to place buttons at the right side of the remarks cell
-                horizontal_pos = rect.x() + rect.width() - 165
-                vertical_pos = rect.y() - 1
-                
-                # Ensure buttons stay within the cell
-                if horizontal_pos < rect.x():
-                    horizontal_pos = rect.x() + 5  # Add small padding from left if cell is too small
-                
-                self.actions_widget.move(horizontal_pos, vertical_pos)
-                self.actions_widget.show()
-        else:
-            if self.actions_widget:
+            if not self.underMouse():
                 self.actions_widget.hide()
+                self.actions_widget.deleteLater()
+                self.actions_widget = None
+        super().leaveEvent(event)
+        
+    def mouseMoveEvent(self, event):
+        # Check if mouse is still in the same row as the action buttons
+        current_row = self.rowAt(event.y())
+        if self.actions_widget and current_row != self.currentRow():
+            self.actions_widget.hide()
+            self.actions_widget.deleteLater()
+            self.actions_widget = None
+            self.setMouseTracking(False)
         super().mouseMoveEvent(event)
+        
+    def eventFilter(self, obj, event):
+        # Handle resize events to maintain column proportions
+        if obj == self.viewport() and event.type() == QEvent.Resize:
+            width = self.viewport().width()
+            self.setColumnWidth(0, int(width * 0.22))  # Name
+            self.setColumnWidth(1, int(width * 0.15))  # Location
+            self.setColumnWidth(2, int(width * 0.18))  # Start Date
+            self.setColumnWidth(3, int(width * 0.18))  # End Date
+            # Remarks column (index 4) will adjust automatically due to Stretch mode
+        return super().eventFilter(obj, event)
 
 class UpdateEventDialog(AddEventDialog):
     def __init__(self, event_data, parent=None):
@@ -302,6 +349,18 @@ class UpdateEventDialog(AddEventDialog):
         self.name_edit.setText(event_data.get('summary', ''))
         self.location_edit.setText(event_data.get('location', ''))
         self.remarks_edit.setText(event_data.get('description', ''))
+        
+        # First determine if this is an all-day event and set the checkbox
+        # An event is all-day if it uses 'date' instead of 'dateTime'
+        is_all_day = 'date' in event_data['start']
+        self.all_day_check.setChecked(is_all_day)
+        
+        # Update the datetime display format based on all-day status
+        if is_all_day:
+            self.start_datetime.setDisplayFormat("yyyy-MM-dd")
+            self.end_datetime.setDisplayFormat("yyyy-MM-dd")
+        else:
+            self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
         
         # Parse start and end times
         start = event_data['start'].get('dateTime', event_data['start'].get('date'))
@@ -595,15 +654,21 @@ class MainWindow(QMainWindow):
                 'summary': event_data['name'],
                 'location': event_data['location'],
                 'description': event_data['remarks'],
-                'start': {
+            }
+            
+            # Handle all-day events differently
+            if event_data.get('is_all_day'):
+                event['start'] = {'date': event_data['start'].strftime('%Y-%m-%d')}
+                event['end'] = {'date': (event_data['end'] + timedelta(days=1)).strftime('%Y-%m-%d')}
+            else:
+                event['start'] = {
                     'dateTime': event_data['start'].isoformat(),
                     'timeZone': 'UTC',
-                },
-                'end': {
+                }
+                event['end'] = {
                     'dateTime': event_data['end'].isoformat(),
                     'timeZone': 'UTC',
-                },
-            }
+                }
             
             event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
             QMessageBox.information(self, "Success", "Event created successfully!")
@@ -783,16 +848,22 @@ class MainWindow(QMainWindow):
                 event = {
                     'summary': updated_data['name'],
                     'location': updated_data['location'],
-                    'description': updated_data['remarks'],
-                    'start': {
+                    'description': updated_data['remarks']
+                }
+                
+                # Handle all-day events differently
+                if updated_data.get('is_all_day'):
+                    event['start'] = {'date': updated_data['start'].strftime('%Y-%m-%d')}
+                    event['end'] = {'date': (updated_data['end'] + timedelta(days=1)).strftime('%Y-%m-%d')}
+                else:
+                    event['start'] = {
                         'dateTime': updated_data['start'].isoformat(),
                         'timeZone': 'UTC',
-                    },
-                    'end': {
+                    }
+                    event['end'] = {
                         'dateTime': updated_data['end'].isoformat(),
                         'timeZone': 'UTC',
-                    },
-                }
+                    }
                 
                 # Preserve any existing fields that we don't update
                 for key in event_data:
@@ -800,7 +871,7 @@ class MainWindow(QMainWindow):
                         event[key] = event_data[key]
                 
                 self.service.events().update(
-                    calendarId='primary',
+                    calendarId=self.calendar_id,
                     eventId=event_data['id'],
                     body=event
                 ).execute()
@@ -825,7 +896,7 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             try:
                 self.service.events().delete(
-                    calendarId='primary',
+                    calendarId=self.calendar_id,
                     eventId=event_data['id']
                 ).execute()
                 
