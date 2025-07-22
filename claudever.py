@@ -18,9 +18,10 @@ from scipy.io import wavfile
 import whisper
 import qtawesome as qta
 
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget)
-from PyQt5.QtGui import QFont, QIcon, QColor, QCursor
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent, QSettings
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit)
+from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence
+from PyQt5.QtWidgets import QProgressDialog
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -30,6 +31,7 @@ from googleapiclient.errors import HttpError
 
 import logging
 from logging.handlers import RotatingFileHandler
+import stat
 
 # -----------------------------
 # Logging Setup (with rotation)
@@ -87,7 +89,17 @@ class WhisperWorker(QThread):
 
     def run(self):
         import torch
+        import whisper
+        progress = None
         try:
+            # Show progress dialog for transcription
+            app = QApplication.instance()
+            if app:
+                progress = QProgressDialog("Transcribing...", None, 0, 0)
+                progress.setWindowModality(Qt.ApplicationModal)
+                progress.setCancelButton(None)
+                progress.setMinimumDuration(0)
+                progress.show()
             # Check for ffmpeg
             logger.info(f"[WhisperWorker] Checking ffmpeg: {shutil.which('ffmpeg')}")
             if shutil.which("ffmpeg") is None:
@@ -123,10 +135,17 @@ class WhisperWorker(QThread):
                 logger.error(f"[WhisperWorker] Transcription failed: {e}\n{traceback.format_exc()}")
                 self.error.emit(f"Transcription failed: {e}")
             finally:
-                # Clean up temp file
+                # Always clean up temp file
                 if os.path.exists(self.temp_file):
-                    os.remove(self.temp_file)
+                    try:
+                        os.remove(self.temp_file)
+                    except Exception as cleanup_err:
+                        logger.warning(f"Failed to remove temp file: {cleanup_err}")
+            if progress:
+                progress.close()
         except Exception as e:
+            if progress:
+                progress.close()
             logger.error(f"[WhisperWorker] Unexpected error: {e}\n{traceback.format_exc()}")
             self.error.emit(str(e))
 
@@ -268,6 +287,21 @@ class ListeningOverlay(QWidget):
                      parent_center.y() - self.height() // 2)
         super().showEvent(event)
 
+# -----------------------------
+# Security utilities
+# -----------------------------
+def set_secure_file_permissions(filepath):
+    """Set file permissions to user-only (0600 on Unix, equivalent on Windows)."""
+    try:
+        if os.name == 'nt':
+            import ctypes
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            ctypes.windll.kernel32.SetFileAttributesW(str(filepath), FILE_ATTRIBUTE_HIDDEN)
+        else:
+            os.chmod(filepath, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception as e:
+        logger.warning(f"Could not set secure permissions on {filepath}: {e}")
+
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -315,6 +349,7 @@ class LoginDialog(QDialog):
                 
                 with open('token.json', 'w') as token:
                     token.write(creds.to_json())
+                set_secure_file_permissions('token.json')
             
             # Test the connection with provided calendar ID
             service = build('calendar', 'v3', credentials=creds)
@@ -428,6 +463,21 @@ class AddEventDialog(QDialog):
         layout.addWidget(buttons)
         
         self.setLayout(layout)
+        self.setTabOrder(self.name_edit, self.location_edit)
+        self.setTabOrder(self.location_edit, self.start_datetime)
+        self.setTabOrder(self.start_datetime, self.end_datetime)
+        self.setTabOrder(self.end_datetime, self.remarks_edit)
+        self.setTabOrder(self.remarks_edit, self.all_day_check)
+        self.setTabOrder(self.all_day_check, self.name_speech)
+        self.setTabOrder(self.name_speech, self.location_speech)
+        self.setTabOrder(self.location_speech, self.remarks_speech)
+        self.setTabOrder(self.remarks_speech, self.findChild(QDialogButtonBox))
+        self.name_edit.setAccessibleName("Event Name")
+        self.location_edit.setAccessibleName("Location")
+        self.start_datetime.setAccessibleName("Start DateTime")
+        self.end_datetime.setAccessibleName("End DateTime")
+        self.remarks_edit.setAccessibleName("Remarks")
+        self.all_day_check.setAccessibleName("All Day Event Checkbox")
     
     def setup_datetime_section(self, date_edit, label, show_time=True):
         # Create a horizontal layout for the date/time section
@@ -468,13 +518,15 @@ class AddEventDialog(QDialog):
         is_all_day = self.all_day_check.isChecked()
         start_dt = self.start_datetime.dateTime().toPyDateTime()
         end_dt = self.end_datetime.dateTime().toPyDateTime()
-        
+        # Sanitize user input: strip, limit length, remove dangerous chars
+        def sanitize(text, maxlen=256):
+            return ''.join(c for c in text.strip() if c.isprintable())[:maxlen]
         return {
-            'name': self.name_edit.text(),
-            'location': self.location_edit.text(),
+            'name': sanitize(self.name_edit.text()),
+            'location': sanitize(self.location_edit.text()),
             'start': start_dt.date() if is_all_day else start_dt,
             'end': end_dt.date() if is_all_day else end_dt,
-            'remarks': self.remarks_edit.toPlainText(),
+            'remarks': sanitize(self.remarks_edit.toPlainText(), 1024),
             'is_all_day': is_all_day
         }
 
@@ -669,6 +721,42 @@ class UpdateEventDialog(AddEventDialog):
             QTime(end_dt.hour, end_dt.minute)
         ))
 
+# -----------------------------
+# SettingsDialog: Simple settings for language and theme
+# -----------------------------
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.setFixedSize(300, 200)
+        layout = QVBoxLayout()
+        # Language selection
+        lang_label = QLabel("Language:")
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["English", "日本語"])
+        layout.addWidget(lang_label)
+        layout.addWidget(self.lang_combo)
+        # Theme selection
+        theme_label = QLabel("Theme:")
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Light", "Dark"])
+        layout.addWidget(theme_label)
+        layout.addWidget(self.theme_combo)
+        # Buttons
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+        self.setLayout(layout)
+    def get_settings(self):
+        return {
+            'language': self.lang_combo.currentText(),
+            'theme': self.theme_combo.currentText()
+        }
+
+# -----------------------------
+# MainWindow: Main application window
+# -----------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -700,6 +788,11 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_theme()
         self.user_label.setText("No connected account")
+        # Keyboard shortcuts
+        self.shortcut_new = QShortcut(QKeySequence("Ctrl+N"), self)
+        self.shortcut_new.activated.connect(self.add_event)
+        self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_quit.activated.connect(self.close)
     
     def setup_ui(self):
         central_widget = QWidget()
@@ -871,6 +964,8 @@ class MainWindow(QMainWindow):
             # Show login option when not logged in
             menu.addSeparator()
             menu.addAction("Login", self.show_login)
+        menu.addSeparator()
+        menu.addAction("Settings", self.show_settings_dialog)
         
         # Show menu at cog button position
         button_pos = self.cog_btn.mapToGlobal(self.cog_btn.rect().bottomLeft())
@@ -1229,6 +1324,24 @@ class MainWindow(QMainWindow):
                 
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to delete event: {str(e)}")
+
+    def show_settings_dialog(self):
+        dlg = SettingsDialog(self)
+        # Set current values
+        if self.language == "ja":
+            dlg.lang_combo.setCurrentIndex(1)
+        else:
+            dlg.lang_combo.setCurrentIndex(0)
+        dlg.theme_combo.setCurrentIndex(1 if self.theme == "dark" else 0)
+        if dlg.exec_() == QDialog.Accepted:
+            settings = dlg.get_settings()
+            # Apply language
+            if settings['language'] == "日本語":
+                self.change_language("ja")
+            else:
+                self.change_language("en")
+            # Apply theme
+            self.change_theme(settings['theme'].lower())
 
 if __name__ == "__main__":
     # --- Startup environment checks ---
