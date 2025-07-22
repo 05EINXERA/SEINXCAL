@@ -1,11 +1,11 @@
-PyQt5>=5.15.0
-qtawesome>=1.1.1
-numpy>=1.19.0
-sounddevice>=0.4.0
-scipy>=1.5.0
-openai-whisper>=20230314
-torch>=1.7.0
-google-api-python-client>=2.0.0
-google-auth-httplib2>=0.1.0
-google-auth-oauthlib>=0.4.0
-# You must also install ffmpeg and add it to your system PATH 
+PyQt5==5.15.11
+qtawesome==1.4.0
+numpy==1.26.4
+sounddevice==0.4.6
+scipy==1.11.4
+openai-whisper==20230314
+torch==2.2.2
+google-api-python-client==2.126.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
+# System dependencies required: ffmpeg (must be in PATH), CUDA (for GPU acceleration, optional) 

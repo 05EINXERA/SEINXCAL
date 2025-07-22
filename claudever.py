@@ -28,6 +28,35 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+import logging
+from logging.handlers import RotatingFileHandler
+
+# -----------------------------
+# Logging Setup (with rotation)
+# -----------------------------
+LOG_FILE = 'seinxcalapp.log'
+logger = logging.getLogger('seinxcalapp')
+logger.setLevel(logging.INFO)
+handler = RotatingFileHandler(LOG_FILE, maxBytes=2*1024*1024, backupCount=3)
+formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+# Global exception hook for uncaught exceptions
+import sys
+from PyQt5.QtWidgets import QMessageBox
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    import traceback
+    tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    logger.error(f"Uncaught exception: {tb_str}")
+    QMessageBox.critical(None, "Unexpected Error", "An unexpected error occurred. Please check the log file for details.")
+
+sys.excepthook = handle_exception
+
 # -----------------------------
 # Google Calendar API Scope
 # -----------------------------
@@ -57,33 +86,32 @@ class WhisperWorker(QThread):
         self.language = lang
 
     def run(self):
-        import logging
         import torch
         try:
             # Check for ffmpeg
-            logging.info(f"[WhisperWorker] Checking ffmpeg: {shutil.which('ffmpeg')}")
+            logger.info(f"[WhisperWorker] Checking ffmpeg: {shutil.which('ffmpeg')}")
             if shutil.which("ffmpeg") is None:
                 self.error.emit("ffmpeg is not installed or not in your PATH. Please install ffmpeg and try again.")
-                logging.error("ffmpeg not found in PATH.")
+                logger.error("ffmpeg not found in PATH.")
                 return
             self.status.emit("Recording audio...")
             try:
                 # Record audio from microphone
-                logging.info(f"[WhisperWorker] Recording to temp file: {self.temp_file}")
+                logger.info(f"[WhisperWorker] Recording to temp file: {self.temp_file}")
                 recording = sd.rec(int(self.duration * self.sample_rate), samplerate=self.sample_rate, channels=1, dtype='int16')
                 sd.wait()
                 wavfile.write(self.temp_file, self.sample_rate, recording)
-                logging.info(f"[WhisperWorker] Temp file exists after recording: {os.path.exists(self.temp_file)}")
+                logger.info(f"[WhisperWorker] Temp file exists after recording: {os.path.exists(self.temp_file)}")
             except Exception as e:
-                logging.error(f"[WhisperWorker] Audio recording failed: {e}\n{traceback.format_exc()}")
+                logger.error(f"[WhisperWorker] Audio recording failed: {e}\n{traceback.format_exc()}")
                 self.error.emit(f"Audio recording failed: {e}")
                 return
             self.status.emit("Transcribing...")
             try:
                 # Transcribe using Whisper (GPU if available)
-                logging.info(f"[WhisperWorker] Checking temp file before transcription: {self.temp_file}, exists: {os.path.exists(self.temp_file)}")
+                logger.info(f"[WhisperWorker] Checking temp file before transcription: {self.temp_file}, exists: {os.path.exists(self.temp_file)}")
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                logging.info(f"[WhisperWorker] Using device: {device}")
+                logger.info(f"[WhisperWorker] Using device: {device}")
                 model = whisper.load_model("base", device=device)
                 result = model.transcribe(self.temp_file, language=self.language)
                 text = result.get("text", "").strip()
@@ -92,14 +120,14 @@ class WhisperWorker(QThread):
                 else:
                     self.finished.emit(text)
             except Exception as e:
-                logging.error(f"[WhisperWorker] Transcription failed: {e}\n{traceback.format_exc()}")
+                logger.error(f"[WhisperWorker] Transcription failed: {e}\n{traceback.format_exc()}")
                 self.error.emit(f"Transcription failed: {e}")
             finally:
                 # Clean up temp file
                 if os.path.exists(self.temp_file):
                     os.remove(self.temp_file)
         except Exception as e:
-            logging.error(f"[WhisperWorker] Unexpected error: {e}\n{traceback.format_exc()}")
+            logger.error(f"[WhisperWorker] Unexpected error: {e}\n{traceback.format_exc()}")
             self.error.emit(str(e))
 
 # -----------------------------
@@ -1203,6 +1231,27 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", f"Failed to delete event: {str(e)}")
 
 if __name__ == "__main__":
+    # --- Startup environment checks ---
+    import shutil
+    import torch
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+    import sounddevice as sd
+    missing = []
+    if shutil.which('ffmpeg') is None:
+        missing.append('ffmpeg (required for audio processing)')
+    if not torch.cuda.is_available():
+        print('Warning: CUDA GPU not detected. Whisper will run on CPU.')
+    try:
+        devices = sd.query_devices()
+        if not any(d['max_input_channels'] > 0 for d in devices):
+            missing.append('microphone (no input device found)')
+    except Exception:
+        missing.append('microphone (error detecting input device)')
+    if missing:
+        app = QApplication(sys.argv)
+        QMessageBox.critical(None, "Missing Dependencies", f"The following are required to run this app:\n- " + "\n- ".join(missing))
+        sys.exit(1)
+    # --- Normal app startup ---
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
