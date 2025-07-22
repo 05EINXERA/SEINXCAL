@@ -537,56 +537,50 @@ class CalendarTable(QTableWidget):
         self.setColumnCount(5)
         self.setHorizontalHeaderLabels(['Name', 'Location', 'Start Date', 'End Date', 'Remarks'])
         self.event_data = {}  # Store event data by row
-        
-        # Make table responsive
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        # Add resize event handler to maintain proportions
         self.viewport().installEventFilter(self)
-        
-        # Set relative column widths with proportional sizes
         header = self.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Name
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Location
-        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Start Date
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # End Date
-        header.setSectionResizeMode(4, QHeaderView.Stretch)     # Remarks
-        
-        # Set proportional widths (total should be less than viewport width)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
         total_width = self.viewport().width()
-        self.setColumnWidth(0, int(total_width * 0.25))  # Name - 22%
-        self.setColumnWidth(1, int(total_width * 0.25))  # Location - 15%
-        self.setColumnWidth(2, int(total_width * 0.18))  # Start Date - 18%
-        self.setColumnWidth(3, int(total_width * 0.18))  # End Date - 18%
-        # Remarks gets remaining ~27% automatically due to Stretch mode
-        
+        self.setColumnWidth(0, int(total_width * 0.25))
+        self.setColumnWidth(1, int(total_width * 0.25))
+        self.setColumnWidth(2, int(total_width * 0.18))
+        self.setColumnWidth(3, int(total_width * 0.18))
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setAlternatingRowColors(True)
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)  # Disable editing
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.cellClicked.connect(self.handle_event_cell_click)
-        
-        #empty rows for adding new events
-        self.setRowCount(50)
-        
-        # Create actions widget
         self.actions_widget = None
-    
+        self.highlighted_row = None
+        self.actions_timer = QTimer(self)
+        self.actions_timer.setSingleShot(True)
+        self.actions_timer.timeout.connect(self.hide_actions_widget)
     def handle_event_cell_click(self, row, column):
+        # Highlight the clicked row with a darker color
+        self.clear_highlight()
+        for col in range(self.columnCount()):
+            item = self.item(row, col)
+            if item:
+                item.setBackground(QColor("#b0b0b0"))  # Darker highlight
+        self.highlighted_row = row
         # Only show actions for event rows (not empty, not separator)
         item = self.item(row, 0)
         if item is None or item.text() == "":
             self.parent_app.add_event()
             return
-        # Don't show for separator row
         if item.text() == "Upcoming Events":
             return
         if self.actions_widget:
             self.actions_widget.hide()
             self.actions_widget.deleteLater()
         self.show_actions_widget(row)
-        # Enable mouse tracking to detect when cursor leaves the row
         self.setMouseTracking(True)
-
+        # Keep actions visible for 5 seconds unless user clicks elsewhere
+        self.actions_timer.start(5000)
     def show_actions_widget(self, row):
         event_data = self.event_data.get(row)
         if not event_data:
@@ -595,8 +589,6 @@ class CalendarTable(QTableWidget):
         layout = QHBoxLayout(self.actions_widget)
         layout.setSpacing(3)
         layout.setContentsMargins(0, 0, 0, 0)
-
-        # Edit button with icon
         edit_btn = QPushButton(self.actions_widget)
         edit_icon = QIcon.fromTheme("edit", QIcon("icons/edit.png"))
         edit_btn.setIcon(edit_icon)
@@ -604,8 +596,6 @@ class CalendarTable(QTableWidget):
         edit_btn.setStyleSheet("border: none; background: transparent;")
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.clicked.connect(lambda: self.parent_app.update_event(event_data))
-
-        # Delete button with icon
         delete_btn = QPushButton(self.actions_widget)
         delete_icon = QIcon.fromTheme("delete", QIcon("icons/delete.png"))
         delete_btn.setIcon(delete_icon)
@@ -613,11 +603,8 @@ class CalendarTable(QTableWidget):
         delete_btn.setStyleSheet("border: none; background: transparent;")
         delete_btn.setCursor(Qt.PointingHandCursor)
         delete_btn.clicked.connect(lambda: self.parent_app.delete_event(event_data))
-
         layout.addWidget(edit_btn)
         layout.addWidget(delete_btn)
-
-        # Position the buttons container in the remarks column
         rect = self.visualItemRect(self.item(row, 4))
         self.actions_widget.setFixedSize(60, rect.height()-2)
         horizontal_pos = rect.x() + rect.width() - 65
@@ -626,7 +613,31 @@ class CalendarTable(QTableWidget):
             horizontal_pos = rect.x() + 5
         self.actions_widget.move(horizontal_pos, vertical_pos)
         self.actions_widget.show()
-    
+    def hide_actions_widget(self):
+        if self.actions_widget:
+            self.actions_widget.hide()
+            self.actions_widget.deleteLater()
+            self.actions_widget = None
+        self.clear_highlight()
+    def clear_highlight(self):
+        if self.highlighted_row is not None:
+            for col in range(self.columnCount()):
+                item = self.item(self.highlighted_row, col)
+                if item:
+                    item.setBackground(QColor("white"))
+            self.highlighted_row = None
+    def leaveEvent(self, event):
+        # Hide actions and highlight when mouse leaves the table or after timer
+        if not self.underMouse():
+            self.hide_actions_widget()
+        super().leaveEvent(event)
+    def mousePressEvent(self, event):
+        # Hide actions if user clicks outside the highlighted row
+        if self.highlighted_row is not None:
+            row = self.rowAt(event.y())
+            if row != self.highlighted_row:
+                self.hide_actions_widget()
+        super().mousePressEvent(event)
     def show_actions_menu(self, row, event_data):
         menu = QMenu(self)
         update_action = menu.addAction("Update")
@@ -637,26 +648,6 @@ class CalendarTable(QTableWidget):
         
         # Show menu at mouse position
         menu.exec_(QCursor.pos())
-    
-    def leaveEvent(self, event):
-        # When mouse leaves the table completely, disable tracking and hide actions
-        self.setMouseTracking(False)
-        if self.actions_widget:
-            if not self.underMouse():
-                self.actions_widget.hide()
-                self.actions_widget.deleteLater()
-                self.actions_widget = None
-        super().leaveEvent(event)
-        
-    def mouseMoveEvent(self, event):
-        # Check if mouse is still in the same row as the action buttons
-        current_row = self.rowAt(event.y())
-        if self.actions_widget and current_row != self.currentRow():
-            self.actions_widget.hide()
-            self.actions_widget.deleteLater()
-            self.actions_widget = None
-            self.setMouseTracking(False)
-        super().mouseMoveEvent(event)
         
     def eventFilter(self, obj, event):
         # Handle resize events to maintain column proportions
@@ -977,9 +968,14 @@ class MainWindow(QMainWindow):
             self.calendar_id = login_dialog.calendar_id
             self.user_email = login_dialog.user_email
             self.service = build('calendar', 'v3', credentials=login_dialog.credentials)
-            self.user_label.setText(self.user_email)
+            # Fetch and display calendar name
+            try:
+                calendar = self.service.calendars().get(calendarId=self.calendar_id).execute()
+                calendar_name = calendar.get('summary', self.calendar_id)
+                self.user_label.setText(calendar_name)
+            except Exception as e:
+                self.user_label.setText(self.calendar_id)
             self.load_events()
-            # Start the auto-refresh timer
             self.refresh_timer.start()
     
     def change_language(self, lang):
