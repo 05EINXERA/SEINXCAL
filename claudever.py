@@ -149,7 +149,10 @@ class SpeechToTextWidget(QWidget):
         self.target_field = target_field
         layout = QHBoxLayout()
         self.mic_button = QPushButton()
-        self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+        if AppSettings.theme == 'dark':
+            self.mic_button.setIcon(qta.icon('fa5s.microphone', color='white'))
+        else:
+            self.mic_button.setIcon(qta.icon('fa5s.microphone'))
         self.mic_button.setToolTip("Click to use voice input for this field")
         self.mic_button.clicked.connect(self.start_listening)
         layout.addWidget(self.mic_button)
@@ -253,8 +256,10 @@ class ListeningOverlay(QWidget):
         self.current_status = ""
     
     def update_mic_icon(self, recording=False):
-        icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), 
-                       color='#4CAF50' if recording else 'white')
+        if AppSettings.theme == 'dark':
+            icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color='white')
+        else:
+            icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color='#4CAF50' if recording else 'black')
         self.mic_label.setPixmap(icon.pixmap(32, 32))
     
     def update_status(self, status):
@@ -596,17 +601,23 @@ class CalendarTable(QTableWidget):
         layout.setSpacing(3)
         layout.setContentsMargins(0, 0, 0, 0)
         edit_btn = QPushButton(self.actions_widget)
-        edit_icon = QIcon.fromTheme("edit", QIcon("icons/edit.png"))
+        if AppSettings.theme == 'dark':
+            edit_icon = QIcon('icons/edit_white.png')
+        else:
+            edit_icon = QIcon.fromTheme('edit', QIcon('icons/edit.png'))
         edit_btn.setIcon(edit_icon)
-        edit_btn.setToolTip("Edit")
-        edit_btn.setStyleSheet("border: none; background: transparent;")
+        edit_btn.setToolTip('Edit')
+        edit_btn.setStyleSheet('border: none; background: transparent;')
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.clicked.connect(lambda: self.parent_app.update_event(event_data))
         delete_btn = QPushButton(self.actions_widget)
-        delete_icon = QIcon.fromTheme("delete", QIcon("icons/delete.png"))
+        if AppSettings.theme == 'dark':
+            delete_icon = QIcon('icons/delete_white.png')
+        else:
+            delete_icon = QIcon.fromTheme('delete', QIcon('icons/delete.png'))
         delete_btn.setIcon(delete_icon)
-        delete_btn.setToolTip("Delete")
-        delete_btn.setStyleSheet("border: none; background: transparent;")
+        delete_btn.setToolTip('Delete')
+        delete_btn.setStyleSheet('border: none; background: transparent;')
         delete_btn.setCursor(Qt.PointingHandCursor)
         delete_btn.clicked.connect(lambda: self.parent_app.delete_event(event_data))
         layout.addWidget(edit_btn)
@@ -630,7 +641,10 @@ class CalendarTable(QTableWidget):
             for col in range(self.columnCount()):
                 item = self.item(self.highlighted_row, col)
                 if item:
-                    item.setBackground(QColor("white"))
+                    if AppSettings.theme == 'dark':
+                        item.setBackground(QColor('#2c313a'))
+                    else:
+                        item.setBackground(QColor('white'))
             self.highlighted_row = None
     def leaveEvent(self, event):
         # Hide actions and highlight when mouse leaves the table or after timer
@@ -1077,15 +1091,15 @@ class MainWindow(QMainWindow):
     def apply_theme(self):
         if AppSettings.theme == "dark":
             self.setStyleSheet("""
-                QMainWindow { background-color: #2b2b2b; color: white; }
-                QWidget { background-color: #2b2b2b; color: white; }
-                QTabWidget::pane { background-color: #3c3c3c; }
-                QTabBar::tab { background-color: #404040; color: white; padding: 8px; }
-                QTabBar::tab:selected { background-color: #555555; }
-                QTableWidget { background-color: #3c3c3c; alternate-background-color: #404040; }
-                QHeaderView::section { background-color: #555555; color: white; }
-                QPushButton { background-color: #555555; color: white; border: 1px solid #777; padding: 5px; }
-                QPushButton:hover { background-color: #666666; }
+                QMainWindow { background-color: #23272e; color: white; }
+                QWidget { background-color: #2c313a; color: white; }
+                QTabWidget::pane { background-color: #23272e; }
+                QTabBar::tab { background-color: #2c313a; color: white; padding: 8px; }
+                QTabBar::tab:selected { background-color: #3a3f4b; }
+                QTableWidget { background-color: #23272e; alternate-background-color: #2c313a; }
+                QHeaderView::section { background-color: #3a3f4b; color: white; }
+                QPushButton { background-color: #3a3f4b; color: white; border: 1px solid #444a5a; padding: 5px; }
+                QPushButton:hover { background-color: #4f5668; }
             """)
         else:
             self.setStyleSheet("""
