@@ -20,8 +20,7 @@ import qtawesome as qta
 
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent, QSettings
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit)
-from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence
-from PyQt5.QtWidgets import QProgressDialog
+from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence, QPainter
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -299,8 +298,7 @@ def set_secure_file_permissions(filepath):
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.language = getattr(parent, 'language', 'en')
-        self.setWindowTitle(tr('login_title', self.language))
+        self.setWindowTitle(tr('login_title'))
         self.setFixedSize(400, 150)
         self.calendar_id = None
         self.credentials = None
@@ -311,14 +309,14 @@ class LoginDialog(QDialog):
         # Calendar ID input
         form_layout = QFormLayout()
         self.calendar_id_input = QLineEdit()
-        self.calendar_id_input.setPlaceholderText(tr('calendar_id', self.language))
-        form_layout.addRow(tr('calendar_id', self.language), self.calendar_id_input)
+        self.calendar_id_input.setPlaceholderText(tr('calendar_id'))
+        form_layout.addRow(tr('calendar_id'), self.calendar_id_input)
         layout.addLayout(form_layout)
         
         # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText(tr('ok', self.language))
-        buttons.button(QDialogButtonBox.Cancel).setText(tr('cancel', self.language))
+        buttons.button(QDialogButtonBox.Ok).setText(tr('ok'))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr('cancel'))
         buttons.accepted.connect(self.login)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -328,7 +326,7 @@ class LoginDialog(QDialog):
     def login(self):
         self.calendar_id = self.calendar_id_input.text().strip()
         if not self.calendar_id:
-            QMessageBox.warning(self, tr('error', self.language), tr('calendar_id', self.language))
+            QMessageBox.warning(self, tr('error'), tr('calendar_id'))
             return
         try:
             creds = None
@@ -348,7 +346,7 @@ class LoginDialog(QDialog):
                                 token.write(creds.to_json())
                         except Exception as e:
                             logger.error(f"Failed to write token.json: {e}")
-                            QMessageBox.critical(self, tr('error', self.language), f"Failed to write token.json: {e}")
+                            QMessageBox.critical(self, tr('error'), f"Failed to write token.json: {e}")
                             return
             # Test the connection with provided calendar ID
             service = build('calendar', 'v3', credentials=creds)
@@ -358,19 +356,18 @@ class LoginDialog(QDialog):
             self.accept()
         except Exception as e:
             logger.error(f"Authentication error: {e}")
-            QMessageBox.warning(self, tr('error', self.language), f"{tr('event_failed', self.language)} {str(e)}")
+            QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
             return
 
 class DateSearchDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.language = getattr(parent, 'language', 'en')
-        self.setWindowTitle(tr('search_calendar_by_date', self.language))
+        self.setWindowTitle(tr('search_calendar_by_date'))
         self.setFixedSize(300, 150)
         
         layout = QVBoxLayout()
         
-        label = QLabel(tr('select_date', self.language))
+        label = QLabel(tr('select_date'))
         layout.addWidget(label)
         
         self.date_edit = QDateEdit()
@@ -379,8 +376,8 @@ class DateSearchDialog(QDialog):
         layout.addWidget(self.date_edit)
         
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText(tr('ok', self.language))
-        buttons.button(QDialogButtonBox.Cancel).setText(tr('cancel', self.language))
+        buttons.button(QDialogButtonBox.Ok).setText(tr('ok'))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr('cancel'))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -393,8 +390,7 @@ class DateSearchDialog(QDialog):
 class AddEventDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.language = getattr(parent, 'language', 'en')
-        self.setWindowTitle(tr('add_event_title', self.language))
+        self.setWindowTitle(tr('add_event_title'))
         self.setFixedSize(400, 320)
         
         layout = QVBoxLayout()
@@ -403,7 +399,7 @@ class AddEventDialog(QDialog):
         name_container = QWidget()
         name_layout = QHBoxLayout(name_container)
         name_layout.setContentsMargins(0, 0, 0, 0)
-        name_label = QLabel(tr('event_name', self.language))
+        name_label = QLabel(tr('event_name'))
         self.name_edit = QLineEdit()
         self.name_speech = SpeechToTextWidget(target_field=self.name_edit)
         self.name_speech.textCaptured.connect(lambda text: self.name_edit.setText(text))
@@ -416,7 +412,7 @@ class AddEventDialog(QDialog):
         location_container = QWidget()
         location_layout = QHBoxLayout(location_container)
         location_layout.setContentsMargins(0, 0, 0, 0)
-        location_label = QLabel(tr('location_label', self.language))
+        location_label = QLabel(tr('location_label'))
         self.location_edit = QLineEdit()
         self.location_speech = SpeechToTextWidget(target_field=self.location_edit)
         self.location_speech.textCaptured.connect(lambda text: self.location_edit.setText(text))
@@ -426,12 +422,12 @@ class AddEventDialog(QDialog):
         layout.addWidget(location_container)
         
         # All Day checkbox
-        self.all_day_check = QCheckBox(tr('all_day_event', self.language))
+        self.all_day_check = QCheckBox(tr('all_day_event'))
         self.all_day_check.stateChanged.connect(self.on_all_day_changed)
         layout.addWidget(self.all_day_check)
         
         # Start date/time
-        layout.addWidget(QLabel(tr('start_datetime', self.language)))
+        layout.addWidget(QLabel(tr('start_datetime')))
         self.start_datetime = QDateTimeEdit()
         self.start_datetime.setDateTime(QDateTime.currentDateTime())
         self.start_datetime.setCalendarPopup(True)
@@ -439,7 +435,7 @@ class AddEventDialog(QDialog):
         layout.addWidget(self.start_datetime)
         
         # End date/time
-        layout.addWidget(QLabel(tr('end_datetime', self.language)))
+        layout.addWidget(QLabel(tr('end_datetime')))
         self.end_datetime = QDateTimeEdit()
         self.end_datetime.setDateTime(QDateTime.currentDateTime().addSecs(3600))
         self.end_datetime.setCalendarPopup(True)
@@ -449,7 +445,7 @@ class AddEventDialog(QDialog):
         remarks_container = QWidget()
         remarks_layout = QHBoxLayout(remarks_container)
         remarks_layout.setContentsMargins(0, 0, 0, 0)
-        remarks_label = QLabel(tr('remarks_label', self.language))
+        remarks_label = QLabel(tr('remarks_label'))
         self.remarks_edit = QTextEdit()
         self.remarks_edit.setMaximumHeight(60)
         self.remarks_speech = SpeechToTextWidget(target_field=self.remarks_edit)
@@ -460,8 +456,6 @@ class AddEventDialog(QDialog):
         layout.addWidget(remarks_container)
         
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText(tr('ok', self.language))
-        buttons.button(QDialogButtonBox.Cancel).setText(tr('cancel', self.language))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -667,8 +661,7 @@ class CalendarTable(QTableWidget):
 class UpdateEventDialog(AddEventDialog):
     def __init__(self, event_data, parent=None):
         super().__init__(parent)
-        self.language = getattr(parent, 'language', 'en')
-        self.setWindowTitle(tr('update_event_title', self.language))
+        self.setWindowTitle(tr('update_event_title'))
         
         # Pre-fill the fields with existing event data
         self.name_edit.setText(event_data.get('summary', ''))
@@ -723,26 +716,23 @@ class UpdateEventDialog(AddEventDialog):
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.language = getattr(parent, 'language', 'en')
-        self.setWindowTitle(tr('settings_title', self.language))
+        self.setWindowTitle("Settings")
         self.setFixedSize(300, 200)
         layout = QVBoxLayout()
         # Language selection
-        lang_label = QLabel(tr('language', self.language))
+        lang_label = QLabel("Language:")
         self.lang_combo = QComboBox()
-        self.lang_combo.addItems([tr('english', self.language), tr('japanese', self.language)])
+        self.lang_combo.addItems(["English", "日本語"])
         layout.addWidget(lang_label)
         layout.addWidget(self.lang_combo)
         # Theme selection
-        theme_label = QLabel(tr('theme', self.language))
+        theme_label = QLabel("Theme:")
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems([tr('light', self.language), tr('dark', self.language)])
+        self.theme_combo.addItems(["Light", "Dark"])
         layout.addWidget(theme_label)
         layout.addWidget(self.theme_combo)
         # Buttons
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.button(QDialogButtonBox.Ok).setText(tr('ok', self.language))
-        btns.button(QDialogButtonBox.Cancel).setText(tr('cancel', self.language))
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
@@ -824,8 +814,8 @@ class MainWindow(QMainWindow):
         button_layout.setContentsMargins(0, 0, 0, 20)  # Add bottom margin
         
         # Create styled buttons
-        self.past_button = QPushButton(tr('past_events', self.language))
-        self.today_button = QPushButton(tr('todays_events', self.language))
+        self.past_button = QPushButton("Past Events")
+        self.today_button = QPushButton("Today's Events")
         
         # Style the buttons
         button_style = """
@@ -931,31 +921,31 @@ class MainWindow(QMainWindow):
     def show_settings_menu(self):
         menu = QMenu(self)
         # Language submenu at top level
-        lang_menu = menu.addMenu(tr('language', self.language))
-        lang_menu.addAction(tr('english', self.language), lambda: self.change_language('en'))
-        lang_menu.addAction(tr('japanese', self.language), lambda: self.change_language('ja'))
+        lang_menu = menu.addMenu(tr('language'))
+        lang_menu.addAction(tr('english'), lambda: self.change_language('en'))
+        lang_menu.addAction(tr('japanese'), lambda: self.change_language('ja'))
         # Speech recognition language submenu
-        speech_menu = menu.addMenu(tr('speech_recognition', self.language))
-        speech_menu.addAction(tr('auto_detect', self.language), lambda: self.change_speech_language('auto'))
-        speech_menu.addAction(tr('english', self.language), lambda: self.change_speech_language('en'))
-        speech_menu.addAction(tr('japanese', self.language), lambda: self.change_speech_language('ja'))
+        speech_menu = menu.addMenu(tr('speech_recognition'))
+        speech_menu.addAction(tr('auto_detect'), lambda: self.change_speech_language('auto'))
+        speech_menu.addAction(tr('english'), lambda: self.change_speech_language('en'))
+        speech_menu.addAction(tr('japanese'), lambda: self.change_speech_language('ja'))
         # Auto-submit option
-        self.auto_submit_action = menu.addAction(tr('auto_submit', self.language))
+        self.auto_submit_action = menu.addAction(tr('auto_submit'))
         self.auto_submit_action.setCheckable(True)
         self.auto_submit_action.setChecked(getattr(self, 'auto_submit', False))
         self.auto_submit_action.triggered.connect(self.toggle_auto_submit)
         # Theme submenu
-        theme_menu = menu.addMenu(tr('theme', self.language))
-        theme_menu.addAction(tr('light', self.language), lambda: self.change_theme('light'))
-        theme_menu.addAction(tr('dark', self.language), lambda: self.change_theme('dark'))
+        theme_menu = menu.addMenu(tr('theme'))
+        theme_menu.addAction(tr('light'), lambda: self.change_theme('light'))
+        theme_menu.addAction(tr('dark'), lambda: self.change_theme('dark'))
         if self.service:
-            menu.addAction(tr('search_by_date', self.language), self.search_by_date)
-            menu.addAction(tr('add_event', self.language), self.add_event)
+            menu.addAction(tr('search_by_date'), self.search_by_date)
+            menu.addAction(tr('add_event'), self.add_event)
             menu.addSeparator()
-            menu.addAction(tr('logout', self.language), self.logout)
+            menu.addAction(tr('logout'), self.logout)
         else:
             menu.addSeparator()
-            menu.addAction(tr('login', self.language), self.show_login)
+            menu.addAction(tr('login'), self.show_login)
         button_pos = self.cog_btn.mapToGlobal(self.cog_btn.rect().bottomLeft())
         menu.exec_(button_pos)
     
@@ -976,17 +966,21 @@ class MainWindow(QMainWindow):
             self.refresh_timer.start()
     
     def change_language(self, lang):
-        self.language = lang
+        AppSettings.language = lang
         settings = QSettings("SEINX", "Calendar")
         settings.setValue("interface_language", lang)
         self.update_ui_text()
         self.update_all_labels_and_buttons()
         self.update_table_headers()
         self.update_date_format()
+        # Notify all dialogs/tables to refresh language
+        for widget in self.findChildren(QWidget):
+            if hasattr(widget, 'refresh_language'):
+                widget.refresh_language()
         QMessageBox.information(
             self,
-            "Language" if lang == "en" else "言語",
-            "Language changed to " + ("English" if lang == "en" else "日本語")
+            tr('language', lang),
+            tr('language_changed', lang)
         )
     
     def change_speech_language(self, lang):
@@ -1005,7 +999,7 @@ class MainWindow(QMainWindow):
     
     def update_ui_text(self):
         # Update all UI text based on current language
-        if self.language == "ja":
+        if AppSettings.language == "ja":
             self.setWindowTitle("SEINXカレンダー")
             self.past_button.setText("過去のイベント")
             self.today_button.setText("今日のイベント")
@@ -1022,26 +1016,26 @@ class MainWindow(QMainWindow):
         # Recursively update all labels and buttons to match the current language
         def update_widget_text(widget):
             if isinstance(widget, QLabel):
-                if self.language == "ja":
+                if AppSettings.language == "ja":
                     if widget.text() == "過去のイベント":
                         widget.setText("過去のイベント")
                     elif widget.text() == "今日のイベント":
                         widget.setText("今日のイベント")
                 else:
-                    if widget.text() == "Past Events":
+                    if widget.text() == "過去のイベント":
                         widget.setText("Past Events")
-                    elif widget.text() == "Today's Events":
+                    elif widget.text() == "今日のイベント":
                         widget.setText("Today's Events")
             elif isinstance(widget, QPushButton):
-                if self.language == "ja":
+                if AppSettings.language == "ja":
                     if widget.text() == "イベント追加":
                         widget.setText("イベント追加")
                     elif widget.text() == "ログアウト":
                         widget.setText("ログアウト")
                 else:
-                    if widget.text() == "Add Event":
+                    if widget.text() == "イベント追加":
                         widget.setText("Add Event")
-                    elif widget.text() == "Logout":
+                    elif widget.text() == "ログアウト":
                         widget.setText("Logout")
             for child in widget.findChildren(QWidget):
                 update_widget_text(child)
@@ -1052,24 +1046,28 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'today_table') and hasattr(self, 'past_table'):
             headers_en = ["Name", "Location", "Start Date", "End Date", "Remarks"]
             headers_ja = ["名前", "場所", "開始日", "終了日", "備考"]
-            headers = headers_ja if self.language == "ja" else headers_en
+            headers = headers_ja if AppSettings.language == "ja" else headers_en
             self.today_table.setHorizontalHeaderLabels(headers)
             self.past_table.setHorizontalHeaderLabels(headers)
     
     def update_date_format(self):
         # Update date label format
         if hasattr(self, 'date_label'):
-            if self.language == "ja":
+            if AppSettings.language == "ja":
                 self.date_label.setText(self.current_date.strftime("%Y/%m/%d"))
             else:
                 self.date_label.setText(self.current_date.strftime("%Y-%m-%d"))
     
     def change_theme(self, theme):
+        AppSettings.theme = theme
         self.theme = theme
         self.apply_theme()
+        # Notify all tables to refresh theme
+        for widget in self.findChildren(CalendarTable):
+            widget.viewport().update()
     
     def apply_theme(self):
-        if self.theme == "dark":
+        if AppSettings.theme == "dark":
             self.setStyleSheet("""
                 QMainWindow { background-color: #2b2b2b; color: white; }
                 QWidget { background-color: #2b2b2b; color: white; }
@@ -1131,11 +1129,11 @@ class MainWindow(QMainWindow):
                 }
             
             event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
-            QMessageBox.information(self, tr('success', self.language), tr('event_created', self.language))
+            QMessageBox.information(self, tr('success'), tr('event_created'))
             self.load_events()
             
         except Exception as e:
-            QMessageBox.warning(self, tr('error', self.language), f"{tr('event_failed', self.language)} {str(e)}")
+            QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
     
     def load_events(self):
         if not self.service:
@@ -1161,7 +1159,7 @@ class MainWindow(QMainWindow):
             self.populate_table(self.past_table, past_events)
             
         except Exception as e:
-            QMessageBox.warning(self, tr('error', self.language), f"{tr('event_failed', self.language)} {str(e)}")
+            QMessageBox.warning(self, "Error", f"Failed to load events: {str(e)}")
     
     def get_events(self, start_time, end_time):
         events_result = self.service.events().list(
@@ -1208,14 +1206,14 @@ class MainWindow(QMainWindow):
                 start_str = start_dt.strftime("%Y-%m-%d %H:%M")
             else:
                 start_dt = datetime.fromisoformat(start)
-                start_str = f"{start_dt.strftime('%Y-%m-%d')} (All day)"
+                start_str = f"{start_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
             
             if 'T' in end:
                 end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
                 end_str = end_dt.strftime("%Y-%m-%d %H:%M")
             else:
                 end_dt = datetime.fromisoformat(end)
-                end_str = f"{end_dt.strftime('%Y-%m-%d')} (All day)"
+                end_str = f"{end_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
             
             # Create new items for each cell
             table.setItem(i, 0, QTableWidgetItem(event.get('summary', 'No Title')))
@@ -1238,8 +1236,17 @@ class MainWindow(QMainWindow):
             current_row += 1
             
             # Add separator row
-            separator_item = QTableWidgetItem("Upcoming Events")
-            separator_item.setBackground(QColor("#f0f0f0"))
+            # Use translated label and theme-aware styling for separator row
+            separator_item = QTableWidgetItem(tr('upcoming_events'))
+            if AppSettings.theme == 'dark':
+                separator_item.setBackground(QColor("#333333"))
+                separator_item.setForeground(QColor("#ffffff"))
+                # Add a bottom border for the breaker
+                separator_item.setData(Qt.UserRole, 'breaker')
+            else:
+                separator_item.setBackground(QColor("#f0f0f0"))
+                separator_item.setForeground(QColor("#222222"))
+                separator_item.setData(Qt.UserRole, 'breaker')
             separator_item.setFont(QFont("Arial", 10, QFont.Bold))
             separator_item.setTextAlignment(Qt.AlignCenter)  # Center the text
             table.setItem(current_row, 0, separator_item)
@@ -1259,14 +1266,14 @@ class MainWindow(QMainWindow):
                     start_str = start_dt.strftime("%Y-%m-%d %H:%M")
                 else:
                     start_dt = datetime.fromisoformat(start)
-                    start_str = f"{start_dt.strftime('%Y-%m-%d')} (All day)"
+                    start_str = f"{start_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
                 
                 if 'T' in end:
                     end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
                     end_str = end_dt.strftime("%Y-%m-%d %H:%M")
                 else:
                     end_dt = datetime.fromisoformat(end)
-                    end_str = f"{end_dt.strftime('%Y-%m-%d')} (All day)"
+                    end_str = f"{end_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
                 
                 table.setItem(current_row, 0, QTableWidgetItem(event.get('summary', 'No Title')))
                 table.setItem(current_row, 1, QTableWidgetItem(event.get('location', '')))
@@ -1336,19 +1343,19 @@ class MainWindow(QMainWindow):
                     body=event
                 ).execute()
                 
-                QMessageBox.information(self, tr('success', self.language), tr('event_update_success', self.language))
+                QMessageBox.information(self, tr('success'), tr('event_update_success'))
                 
                 # Force a refresh from the server
                 QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
                 
             except Exception as e:
-                QMessageBox.warning(self, tr('error', self.language), f"{tr('event_update_failed', self.language)} {str(e)}")
+                QMessageBox.warning(self, tr('error'), f"{tr('event_update_failed')} {str(e)}")
     
     def delete_event(self, event_data):
         reply = QMessageBox.question(
             self,
-            tr('delete_event', self.language),
-            tr('delete_confirm', self.language),
+            tr('delete_event'),
+            tr('delete_confirm'),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -1360,22 +1367,22 @@ class MainWindow(QMainWindow):
                     eventId=event_data['id']
                 ).execute()
                 
-                QMessageBox.information(self, tr('success', self.language), tr('event_deleted', self.language))
+                QMessageBox.information(self, tr('success'), tr('event_deleted'))
                 
                 # Force a refresh from the server
                 QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
                 
             except Exception as e:
-                QMessageBox.warning(self, tr('error', self.language), f"{tr('event_failed', self.language)} {str(e)}")
+                QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
 
     def show_settings_dialog(self):
         dlg = SettingsDialog(self)
         # Set current values
-        if self.language == "ja":
+        if AppSettings.language == "ja":
             dlg.lang_combo.setCurrentIndex(1)
         else:
             dlg.lang_combo.setCurrentIndex(0)
-        dlg.theme_combo.setCurrentIndex(1 if self.theme == "dark" else 0)
+        dlg.theme_combo.setCurrentIndex(1 if AppSettings.theme == "dark" else 0)
         if dlg.exec_() == QDialog.Accepted:
             settings = dlg.get_settings()
             # Apply language
@@ -1444,6 +1451,8 @@ TRANSLATIONS = {
         'date_label': 'Date',
         'user_label': 'User',
         'cog_tooltip': 'Settings',
+        'upcoming_events': 'Upcoming Events',
+        'all_day': 'All day',
     },
     'ja': {
         'language': '言語',
@@ -1501,10 +1510,19 @@ TRANSLATIONS = {
         'date_label': '日付',
         'user_label': 'ユーザー',
         'cog_tooltip': '設定',
+        'upcoming_events': '予定イベント',
+        'all_day': '終日',
     }
 }
 
-def tr(key, lang):
+# Central settings object for language and theme
+class AppSettings:
+    language = 'en'
+    theme = 'light'
+
+def tr(key, lang=None):
+    if lang is None:
+        lang = AppSettings.language
     return TRANSLATIONS.get(lang, TRANSLATIONS['en']).get(key, key)
 
 if __name__ == "__main__":
