@@ -988,12 +988,19 @@ class MainWindow(QMainWindow):
         # Date (right)
         self.date_label = QLabel(self.current_date.strftime("%Y-%m-%d"))
         self.date_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+
+        # Today button (hidden by default)
+        self.today_btn = QPushButton("Today")
+        self.today_btn.setVisible(False)
+        self.today_btn.setStyleSheet("font-size: 14px; padding: 4px 12px; border-radius: 8px;")
+        self.today_btn.clicked.connect(self.reset_to_today)
         
         layout.addWidget(self.cog_btn)
         layout.addStretch()
         layout.addWidget(self.user_label)
         layout.addStretch()
         layout.addWidget(self.date_label)
+        layout.addWidget(self.today_btn)
         
         return info_bar
     
@@ -1083,13 +1090,29 @@ class MainWindow(QMainWindow):
             self.past_button.setText("過去のイベント")
             self.today_button.setText("今日のイベント")
             if hasattr(self, 'user_label'):
-                self.user_label.setText("未接続")
+                if self.service:
+                    try:
+                        calendar = self.service.calendars().get(calendarId=self.calendar_id).execute()
+                        calendar_name = calendar.get('summary', self.calendar_id)
+                        self.user_label.setText(calendar_name)
+                    except Exception:
+                        self.user_label.setText(self.calendar_id or "ユーザー")
+                else:
+                    self.user_label.setText("未接続")
         else:
             self.setWindowTitle("SEINX Calendar")
             self.past_button.setText("Past Events")
             self.today_button.setText("Today's Events")
             if hasattr(self, 'user_label'):
-                self.user_label.setText("Not logged in")
+                if self.service:
+                    try:
+                        calendar = self.service.calendars().get(calendarId=self.calendar_id).execute()
+                        calendar_name = calendar.get('summary', self.calendar_id)
+                        self.user_label.setText(calendar_name)
+                    except Exception:
+                        self.user_label.setText(self.calendar_id or "User")
+                else:
+                    self.user_label.setText("Not logged in")
     
     def update_all_labels_and_buttons(self):
         # Recursively update all labels and buttons to match the current language
@@ -1180,6 +1203,11 @@ class MainWindow(QMainWindow):
             self.current_date = selected_date
             self.date_label.setText(selected_date.strftime("%Y-%m-%d"))
             self.load_events()
+            # Show Today button if not today
+            if self.current_date != datetime.now().date():
+                self.today_btn.setVisible(True)
+            else:
+                self.today_btn.setVisible(False)
     
     def add_event(self):
         dialog = AddEventDialog(self)
@@ -1377,6 +1405,12 @@ class MainWindow(QMainWindow):
             table.insertRow(row)
             for col in range(table.columnCount()):
                 table.setItem(row, col, QTableWidgetItem(""))
+    
+    def reset_to_today(self):
+        self.current_date = datetime.now().date()
+        self.date_label.setText(self.current_date.strftime("%Y-%m-%d"))
+        self.load_events()
+        self.today_btn.setVisible(False)
     
     def logout(self):
         # Stop the auto-refresh timer
