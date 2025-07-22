@@ -229,10 +229,8 @@ class ListeningOverlay(QWidget):
         
         # Status label
         self.status_label = QLabel("Initializing...")
-        self.status_label.setStyleSheet("""
-            font-size: 16px;
-            font-weight: bold;
-        """)
+        self.set_status_label_color()
+        self.status_label.setStyleSheet(self.status_label.styleSheet() + "\nfont-size: 16px; font-weight: bold;")
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
         
@@ -259,12 +257,20 @@ class ListeningOverlay(QWidget):
         if AppSettings.theme == 'dark':
             icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color='white')
         else:
-            icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color='#4CAF50' if recording else 'black')
+            color = '#4CAF50' if recording else 'black'
+            icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color=color)
         self.mic_label.setPixmap(icon.pixmap(32, 32))
+    
+    def set_status_label_color(self):
+        if AppSettings.theme == 'dark':
+            self.status_label.setStyleSheet("color: white;" + "\nfont-size: 16px; font-weight: bold;")
+        else:
+            self.status_label.setStyleSheet("color: black;" + "\nfont-size: 16px; font-weight: bold;")
     
     def update_status(self, status):
         self.current_status = status
         self.status_label.setText(status)
+        self.set_status_label_color()
         
         # Update microphone icon based on status
         if status == "Recording audio...":
@@ -788,7 +794,7 @@ class MainWindow(QMainWindow):
         self.resize(width, height)
         self.move((screen.width() - width) // 2, (screen.height() - height) // 2)
         
-        self.setWindowIcon(QIcon('calendar-app-50.png'))
+        self.setWindowIcon(QIcon('icons/calendar-app-50.png'))
         self.setWindowTitle("SEINXCAL")
         
         # Setup auto-refresh timer
@@ -1084,9 +1090,11 @@ class MainWindow(QMainWindow):
         AppSettings.theme = theme
         self.theme = theme
         self.apply_theme()
-        # Notify all tables to refresh theme
+        # Notify all tables to refresh theme and row backgrounds
         for widget in self.findChildren(CalendarTable):
             widget.viewport().update()
+            # Always clear highlight so no row is left with the wrong color
+            widget.clear_highlight()
     
     def apply_theme(self):
         if AppSettings.theme == "dark":

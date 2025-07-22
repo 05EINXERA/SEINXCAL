@@ -8,3 +8,4 @@ output/
 *.jpg
 tenv/
 *.log
+setup_/
