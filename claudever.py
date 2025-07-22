@@ -2,13 +2,12 @@ import sys
 import qtawesome as qta
 import json
 import os
-import speech_recognition as sr
 import threading
-import sys
-import json
-import os
-import speech_recognition as sr
-import threading
+import numpy as np
+import sounddevice as sd
+from scipy.io import wavfile
+import whisper
+from PyQt5.QtCore import QThread, pyqtSignal, QRunnable, QThreadPool, QObject
 from datetime import datetime, timedelta
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
@@ -19,9 +18,110 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+import shutil
+import traceback
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+# --- Whisper Integration: New Implementation ---
+class WhisperWorker(QThread):
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+    status = pyqtSignal(str)
+
+    def __init__(self, duration=5, parent=None):
+        super().__init__(parent)
+        self.duration = duration
+        self.sample_rate = 16000
+        self.temp_file = os.path.join(os.path.expanduser("~"), ".seinxcal_temp_new.wav")
+        self.language = "en"
+
+    def set_language(self, lang):
+        self.language = lang
+
+    def run(self):
+        import logging
+        import torch
+        try:
+            logging.info(f"[WhisperWorker] Checking ffmpeg: {shutil.which('ffmpeg')}")
+            if shutil.which("ffmpeg") is None:
+                self.error.emit("ffmpeg is not installed or not in your PATH. Please install ffmpeg and try again.")
+                logging.error("ffmpeg not found in PATH.")
+                return
+            self.status.emit("Recording audio...")
+            try:
+                logging.info(f"[WhisperWorker] Recording to temp file: {self.temp_file}")
+                recording = sd.rec(int(self.duration * self.sample_rate), samplerate=self.sample_rate, channels=1, dtype='int16')
+                sd.wait()
+                wavfile.write(self.temp_file, self.sample_rate, recording)
+                logging.info(f"[WhisperWorker] Temp file exists after recording: {os.path.exists(self.temp_file)}")
+            except Exception as e:
+                logging.error(f"[WhisperWorker] Audio recording failed: {e}\n{traceback.format_exc()}")
+                self.error.emit(f"Audio recording failed: {e}")
+                return
+            self.status.emit("Transcribing...")
+            try:
+                logging.info(f"[WhisperWorker] Checking temp file before transcription: {self.temp_file}, exists: {os.path.exists(self.temp_file)}")
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                logging.info(f"[WhisperWorker] Using device: {device}")
+                model = whisper.load_model("base", device=device)
+                result = model.transcribe(self.temp_file, language=self.language)
+                text = result.get("text", "").strip()
+                if not text:
+                    self.error.emit("No speech detected. Please try again.")
+                else:
+                    self.finished.emit(text)
+            except Exception as e:
+                logging.error(f"[WhisperWorker] Transcription failed: {e}\n{traceback.format_exc()}")
+                self.error.emit(f"pTranscription failed: {e}")
+            finally:
+                if os.path.exists(self.temp_file):
+                    os.remove(self.temp_file)
+        except Exception as e:
+            logging.error(f"[WhisperWorker] Unexpected error: {e}\n{traceback.format_exc()}")
+            self.error.emit(str(e))
+
+class SpeechToTextWidget(QWidget):
+    textCaptured = pyqtSignal(str)
+    def __init__(self, parent=None, target_field=None):
+        super().__init__(parent)
+        self.target_field = target_field
+        layout = QHBoxLayout()
+        self.mic_button = QPushButton()
+        self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+        self.mic_button.setToolTip("Click to use voice input for this field")
+        self.mic_button.clicked.connect(self.start_listening)
+        layout.addWidget(self.mic_button)
+        self.setLayout(layout)
+        self.worker = None
+        self.language = "en"
+    def set_language(self, lang):
+        self.language = lang
+        if self.worker is not None:
+            self.worker.set_language(lang)
+    def start_listening(self):
+        self.mic_button.setEnabled(False)
+        self.worker = WhisperWorker()
+        self.worker.set_language(self.language)
+        self.worker.finished.connect(self.on_transcription_complete)
+        self.worker.error.connect(self.on_transcription_error)
+        self.worker.status.connect(self.on_status_update)
+        self.worker.start()
+    def on_transcription_complete(self, text):
+        self.mic_button.setEnabled(True)
+        self.textCaptured.emit(text)
+        if self.target_field is not None:
+            if isinstance(self.target_field, QTextEdit):
+                self.target_field.append(text)
+            else:
+                self.target_field.setText(text)
+    def on_transcription_error(self, error_msg):
+        self.mic_button.setEnabled(True)
+        QMessageBox.warning(self, "Speech Recognition Error", error_msg)
+    def on_status_update(self, status):
+        self.mic_button.setToolTip(status)
+
 
 class ListeningOverlay(QWidget):
     def __init__(self, parent=None):
@@ -36,43 +136,68 @@ class ListeningOverlay(QWidget):
                 background-color: rgba(0, 0, 0, 0.7);
                 border-radius: 10px;
             }
+            QLabel {
+                color: white;
+                background-color: transparent;
+            }
         """)
         
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         # Add microphone icon
-        mic_label = QLabel()
-        mic_icon = qta.icon('fa5s.microphone', color='white')
-        mic_label.setPixmap(mic_icon.pixmap(32, 32))
-        layout.addWidget(mic_label, alignment=Qt.AlignCenter)
+        self.mic_label = QLabel()
+        self.update_mic_icon()
+        layout.addWidget(self.mic_label, alignment=Qt.AlignCenter)
         
-        # Animated dots for visual feedback
-        self.label = QLabel("Listening")
-        self.label.setStyleSheet("""
-            QLabel {
-                color: black;
-                font-size: 18px;
-                font-weight: bold;
-                background-color: transparent;
-                padding: 10px;
-            }
+        # Status label
+        self.status_label = QLabel("Initializing...")
+        self.status_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
         """)
-        layout.addWidget(self.label, alignment=Qt.AlignCenter)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
+        
+        # Progress indicator
+        self.progress_label = QLabel()
+        self.progress_label.setStyleSheet("font-size: 14px;")
+        self.progress_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.progress_label)
         
         self.setLayout(layout)
+        
+        # Animation
         self.dots = 0
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_dots)
+        self.timer.timeout.connect(self.update_animation)
         self.timer.start(500)
         
         # Set fixed size for the overlay
-        self.setFixedSize(200, 150)
+        self.setFixedSize(250, 150)
+        
+        self.current_status = ""
     
-    def update_dots(self):
+    def update_mic_icon(self, recording=False):
+        icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), 
+                       color='#4CAF50' if recording else 'white')
+        self.mic_label.setPixmap(icon.pixmap(32, 32))
+    
+    def update_status(self, status):
+        self.current_status = status
+        self.status_label.setText(status)
+        
+        # Update microphone icon based on status
+        if status == "Recording audio...":
+            self.update_mic_icon(True)
+        else:
+            self.update_mic_icon(False)
+    
+    def update_animation(self):
         self.dots = (self.dots + 1) % 4
-        self.label.setText("Listening" + "." * self.dots)
+        self.progress_label.setText("." * self.dots)
     
     def showEvent(self, event):
         if self.parent():
@@ -82,57 +207,6 @@ class ListeningOverlay(QWidget):
             self.move(parent_center.x() - self.width() // 2,
                      parent_center.y() - self.height() // 2)
         super().showEvent(event)
-
-class SpeechToTextWidget(QWidget):
-    textCaptured = pyqtSignal(str)
-    
-    def __init__(self, parent=None, target_field=None):
-        super().__init__(parent)
-        self.target_field = target_field
-        self.recognizer = sr.Recognizer()
-        
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.mic_button = QPushButton()
-        self.mic_button.setIcon(qta.icon('fa5s.microphone'))
-        self.mic_button.setFixedSize(24, 24)
-        self.mic_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                border-radius: 12px;
-                padding: 2px;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-            }
-        """)
-        self.mic_button.clicked.connect(self.start_listening)
-        
-        layout.addWidget(self.mic_button)
-        self.setLayout(layout)
-        
-        self.overlay = ListeningOverlay(self.window())
-        self.overlay.hide()
-    
-    def start_listening(self):
-        self.overlay.show()
-        threading.Thread(target=self.listen_and_convert, daemon=True).start()
-    
-    def listen_and_convert(self):
-        with sr.Microphone() as source:
-            try:
-                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                text = self.recognizer.recognize_google(audio)
-                self.textCaptured.emit(text)
-            except sr.UnknownValueError:
-                self.textCaptured.emit("")
-            except Exception as e:
-                print(f"Error in speech recognition: {str(e)}")
-                self.textCaptured.emit("")
-            finally:
-                QMetaObject.invokeMethod(self.overlay, "hide", Qt.QueuedConnection)
 
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
@@ -706,9 +780,21 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         
         # Language submenu
-        lang_menu = menu.addMenu("Language")
+        lang_menu = menu.addMenu("Interface Language")
         lang_menu.addAction("English", lambda: self.change_language("en"))
-        lang_menu.addAction("Spanish", lambda: self.change_language("es"))
+        lang_menu.addAction("日本語", lambda: self.change_language("ja"))
+        
+        # Speech recognition language submenu
+        speech_menu = menu.addMenu("Speech Recognition")
+        speech_menu.addAction("Auto-detect", lambda: self.change_speech_language("auto"))
+        speech_menu.addAction("English", lambda: self.change_speech_language("en"))
+        speech_menu.addAction("日本語", lambda: self.change_speech_language("ja"))
+        
+        # Auto-submit option
+        self.auto_submit_action = menu.addAction("Auto-submit after speech")
+        self.auto_submit_action.setCheckable(True)
+        self.auto_submit_action.setChecked(getattr(self, 'auto_submit', False))
+        self.auto_submit_action.triggered.connect(self.toggle_auto_submit)
         
         # Theme submenu
         theme_menu = menu.addMenu("Theme")
@@ -743,9 +829,42 @@ class MainWindow(QMainWindow):
     
     def change_language(self, lang):
         self.language = lang
-        #language switching logic
-
-        QMessageBox.information(self, "Language", f"Language changed to {lang}")
+        # Save preference
+        settings = QSettings("SEINX", "Calendar")
+        settings.setValue("interface_language", lang)
+        
+        # Update UI text based on language
+        self.update_ui_text()
+        QMessageBox.information(
+            self,
+            "Language" if lang == "en" else "言語",
+            "Language changed to " + ("English" if lang == "en" else "日本語")
+        )
+    
+    def change_speech_language(self, lang):
+        settings = QSettings("SEINX", "Calendar")
+        settings.setValue("speech_language", lang)
+        # Notify all speech widgets about the change
+        for widget in self.findChildren(SpeechToTextWidget):
+            widget.set_language(lang)
+    
+    def toggle_auto_submit(self, checked):
+        settings = QSettings("SEINX", "Calendar")
+        settings.setValue("auto_submit", checked)
+        # Update all speech widgets
+        for widget in self.findChildren(SpeechToTextWidget):
+            widget.set_auto_submit(checked)
+    
+    def update_ui_text(self):
+        # Update all UI text based on current language
+        if self.language == "ja":
+            self.setWindowTitle("SEINXカレンダー")
+            self.past_button.setText("過去のイベント")
+            self.today_button.setText("今日のイベント")
+        else:
+            self.setWindowTitle("SEINX Calendar")
+            self.past_button.setText("Past Events")
+            self.today_button.setText("Today's Events")
     
     def change_theme(self, theme):
         self.theme = theme
