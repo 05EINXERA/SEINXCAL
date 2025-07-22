@@ -533,7 +533,9 @@ class CalendarTable(QTableWidget):
         super().__init__(parent)
         self.parent_app = parent
         self.setColumnCount(5)
-        self.setHorizontalHeaderLabels(['Name', 'Location', 'Start Date', 'End Date', 'Remarks'])
+        self.setHorizontalHeaderLabels([
+            tr('name'), tr('location'), tr('start_date'), tr('end_date'), tr('remarks')
+        ])
         self.event_data = {}  # Store event data by row
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.viewport().installEventFilter(self)
@@ -548,6 +550,7 @@ class CalendarTable(QTableWidget):
         self.setColumnWidth(1, int(total_width * 0.25))
         self.setColumnWidth(2, int(total_width * 0.18))
         self.setColumnWidth(3, int(total_width * 0.18))
+        # Remarks column (index 4) will adjust automatically due to Stretch mode
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setAlternatingRowColors(True)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -557,6 +560,11 @@ class CalendarTable(QTableWidget):
         self.actions_timer = QTimer(self)
         self.actions_timer.setSingleShot(True)
         self.actions_timer.timeout.connect(self.hide_actions_widget)
+        # Hide scroll bars
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Hide row numbers
+        self.verticalHeader().setVisible(False)
     def handle_event_cell_click(self, row, column):
         # Highlight the clicked row with a darker color
         self.clear_highlight()
