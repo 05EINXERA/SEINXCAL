@@ -1,49 +1,66 @@
+# -----------------------------
+# SEINXCAL: Calendar App with Voice Input
+# -----------------------------
+# Main application file
+# -----------------------------
+
 import sys
-import qtawesome as qta
-import json
 import os
+import json
+import shutil
+import traceback
 import threading
+from datetime import datetime, timedelta
+
 import numpy as np
 import sounddevice as sd
 from scipy.io import wavfile
 import whisper
-from PyQt5.QtCore import QThread, pyqtSignal, QRunnable, QThreadPool, QObject
-from datetime import datetime, timedelta
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtCore import QTimer
+import qtawesome as qta
+
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget)
+from PyQt5.QtGui import QFont, QIcon, QColor, QCursor
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import shutil
-import traceback
 
-# If modifying these scopes, delete the file token.json.
+# -----------------------------
+# Google Calendar API Scope
+# -----------------------------
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-# --- Whisper Integration: New Implementation ---
+# -----------------------------
+# WhisperWorker: Handles audio recording and transcription
+# -----------------------------
 class WhisperWorker(QThread):
+    """
+    Worker thread for recording audio and transcribing it using OpenAI Whisper.
+    Emits signals for finished transcription, errors, and status updates.
+    """
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
     status = pyqtSignal(str)
 
     def __init__(self, duration=5, parent=None):
         super().__init__(parent)
-        self.duration = duration
-        self.sample_rate = 16000
+        self.duration = duration  # Recording duration in seconds
+        self.sample_rate = 16000  # Whisper expects 16kHz
         self.temp_file = os.path.join(os.path.expanduser("~"), ".seinxcal_temp_new.wav")
-        self.language = "en"
+        self.language = "en"  # Default language
 
     def set_language(self, lang):
+        """Set the language for transcription."""
         self.language = lang
 
     def run(self):
         import logging
         import torch
         try:
+            # Check for ffmpeg
             logging.info(f"[WhisperWorker] Checking ffmpeg: {shutil.which('ffmpeg')}")
             if shutil.which("ffmpeg") is None:
                 self.error.emit("ffmpeg is not installed or not in your PATH. Please install ffmpeg and try again.")
@@ -51,6 +68,7 @@ class WhisperWorker(QThread):
                 return
             self.status.emit("Recording audio...")
             try:
+                # Record audio from microphone
                 logging.info(f"[WhisperWorker] Recording to temp file: {self.temp_file}")
                 recording = sd.rec(int(self.duration * self.sample_rate), samplerate=self.sample_rate, channels=1, dtype='int16')
                 sd.wait()
@@ -62,6 +80,7 @@ class WhisperWorker(QThread):
                 return
             self.status.emit("Transcribing...")
             try:
+                # Transcribe using Whisper (GPU if available)
                 logging.info(f"[WhisperWorker] Checking temp file before transcription: {self.temp_file}, exists: {os.path.exists(self.temp_file)}")
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
                 logging.info(f"[WhisperWorker] Using device: {device}")
@@ -74,15 +93,23 @@ class WhisperWorker(QThread):
                     self.finished.emit(text)
             except Exception as e:
                 logging.error(f"[WhisperWorker] Transcription failed: {e}\n{traceback.format_exc()}")
-                self.error.emit(f"pTranscription failed: {e}")
+                self.error.emit(f"Transcription failed: {e}")
             finally:
+                # Clean up temp file
                 if os.path.exists(self.temp_file):
                     os.remove(self.temp_file)
         except Exception as e:
             logging.error(f"[WhisperWorker] Unexpected error: {e}\n{traceback.format_exc()}")
             self.error.emit(str(e))
 
+# -----------------------------
+# SpeechToTextWidget: UI for voice input
+# -----------------------------
 class SpeechToTextWidget(QWidget):
+    """
+    Widget with a microphone button for voice input.
+    Emits textCaptured when transcription is complete.
+    """
     textCaptured = pyqtSignal(str)
     def __init__(self, parent=None, target_field=None):
         super().__init__(parent)
@@ -97,10 +124,12 @@ class SpeechToTextWidget(QWidget):
         self.worker = None
         self.language = "en"
     def set_language(self, lang):
+        """Set the language for the next transcription."""
         self.language = lang
         if self.worker is not None:
             self.worker.set_language(lang)
     def start_listening(self):
+        """Start recording and transcribing audio."""
         self.mic_button.setEnabled(False)
         self.worker = WhisperWorker()
         self.worker.set_language(self.language)
@@ -109,6 +138,7 @@ class SpeechToTextWidget(QWidget):
         self.worker.status.connect(self.on_status_update)
         self.worker.start()
     def on_transcription_complete(self, text):
+        """Handle successful transcription."""
         self.mic_button.setEnabled(True)
         self.textCaptured.emit(text)
         if self.target_field is not None:
@@ -117,9 +147,11 @@ class SpeechToTextWidget(QWidget):
             else:
                 self.target_field.setText(text)
     def on_transcription_error(self, error_msg):
+        """Handle errors during transcription."""
         self.mic_button.setEnabled(True)
         QMessageBox.warning(self, "Speech Recognition Error", error_msg)
     def on_status_update(self, status):
+        """Update tooltip with current status."""
         self.mic_button.setToolTip(status)
 
 
