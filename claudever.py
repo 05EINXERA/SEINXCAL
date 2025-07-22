@@ -18,7 +18,7 @@ from scipy.io import wavfile
 import whisper
 import qtawesome as qta
 
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent, QSettings
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent, QSettings, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit)
 from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence, QPainter
 
@@ -31,6 +31,7 @@ from googleapiclient.errors import HttpError
 import logging
 from logging.handlers import RotatingFileHandler
 import stat
+import tzlocal
 
 # -----------------------------
 # Logging Setup (with rotation)
@@ -74,18 +75,18 @@ class WhisperWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
     status = pyqtSignal(str)
-
+    
     def __init__(self, duration=5, parent=None):
         super().__init__(parent)
         self.duration = duration  # Recording duration in seconds
         self.sample_rate = 16000  # Whisper expects 16kHz
         self.temp_file = os.path.join(os.path.expanduser("~"), ".seinxcal_temp_new.wav")
         self.language = "en"  # Default language
-
+    
     def set_language(self, lang):
         """Set the language for transcription."""
         self.language = lang
-
+    
     def run(self):
         import torch
         import whisper
@@ -613,7 +614,7 @@ class CalendarTable(QTableWidget):
             edit_icon = QIcon.fromTheme('edit', QIcon('icons/edit.png'))
         edit_btn.setIcon(edit_icon)
         edit_btn.setToolTip('Edit')
-        edit_btn.setStyleSheet('border: none; background: transparent;')
+        edit_btn.setStyleSheet('border: none; background: transparent; color: white;')
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.clicked.connect(lambda: self.parent_app.update_event(event_data))
         delete_btn = QPushButton(self.actions_widget)
@@ -623,7 +624,7 @@ class CalendarTable(QTableWidget):
             delete_icon = QIcon.fromTheme('delete', QIcon('icons/delete.png'))
         delete_btn.setIcon(delete_icon)
         delete_btn.setToolTip('Delete')
-        delete_btn.setStyleSheet('border: none; background: transparent;')
+        delete_btn.setStyleSheet('border: none; background: transparent; color: white;')
         delete_btn.setCursor(Qt.PointingHandCursor)
         delete_btn.clicked.connect(lambda: self.parent_app.delete_event(event_data))
         layout.addWidget(edit_btn)
@@ -774,6 +775,55 @@ class SettingsDialog(QDialog):
 # -----------------------------
 # MainWindow: Main application window
 # -----------------------------
+class Snackbar(QLabel):
+    """
+    A simple snackbar widget for temporary user notifications.
+    Appears at the bottom center of the parent window and fades in/out.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "background-color: rgba(50, 50, 50, 0.95); color: white; "
+            "border-radius: 8px; padding: 12px 32px; font-size: 15px;"
+        )
+        self.setAlignment(Qt.AlignCenter)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setVisible(False)
+        self.anim = QPropertyAnimation(self, b"windowOpacity")
+        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self.anim.finished.connect(self._on_fade_out)
+        self._is_showing = False
+    def show_snackbar(self, message, duration=3000):
+        if self._is_showing:
+            self.hide()
+        self.setText(message)
+        self.adjustSize()
+        parent = self.parentWidget()
+        if parent:
+            x = (parent.width() - self.width()) // 2
+            y = parent.height() - self.height() - 40
+            self.move(x, y)
+        self.setWindowOpacity(0.0)
+        self.setVisible(True)
+        self.anim.stop()
+        self.anim.setDuration(250)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.start()
+        QTimer.singleShot(duration, self.fade_out)
+        self._is_showing = True
+    def fade_out(self):
+        self.anim.stop()
+        self.anim.setDuration(400)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.start()
+    def _on_fade_out(self):
+        if self.windowOpacity() == 0.0:
+            self.setVisible(False)
+            self._is_showing = False
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -810,6 +860,7 @@ class MainWindow(QMainWindow):
         self.shortcut_new.activated.connect(self.add_event)
         self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
         self.shortcut_quit.activated.connect(self.close)
+        self.snackbar = Snackbar(self)
     
     def setup_ui(self):
         central_widget = QWidget()
@@ -1138,6 +1189,8 @@ class MainWindow(QMainWindow):
     
     def create_calendar_event(self, event_data):
         try:
+            import tzlocal
+            local_tz = tzlocal.get_localzone_name()
             event = {
                 'summary': event_data['name'],
                 'location': event_data['location'],
@@ -1151,15 +1204,15 @@ class MainWindow(QMainWindow):
             else:
                 event['start'] = {
                     'dateTime': event_data['start'].isoformat(),
-                    'timeZone': 'UTC',
+                    'timeZone': local_tz,
                 }
                 event['end'] = {
                     'dateTime': event_data['end'].isoformat(),
-                    'timeZone': 'UTC',
+                    'timeZone': local_tz,
                 }
             
             event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
-            QMessageBox.information(self, tr('success'), tr('event_created'))
+            self.show_snackbar(tr('event_created'))
             self.load_events()
             
         except Exception as e:
@@ -1219,9 +1272,8 @@ class MainWindow(QMainWindow):
         if upcoming_events:
             # Add 1 for separator and the length of upcoming events
             total_rows += len(upcoming_events) + 1
-        
-        # Set new row count (add extra rows for new events)
-        table.setRowCount(total_rows + 20)
+        # Set new row count (no extra rows)
+        table.setRowCount(total_rows)
         
         # Filter out any deleted events
         active_events = [event for event in events if not event.get('status') == 'cancelled']
@@ -1316,6 +1368,15 @@ class MainWindow(QMainWindow):
         
         # Refresh the table
         table.viewport().update()
+
+        # Fill with empty rows to the end of the viewport
+        visible_rows = table.viewport().height() // table.rowHeight(0) if table.rowCount() > 0 else 10
+        extra_rows = max(0, visible_rows - table.rowCount())
+        for _ in range(extra_rows):
+            row = table.rowCount()
+            table.insertRow(row)
+            for col in range(table.columnCount()):
+                table.setItem(row, col, QTableWidgetItem(""))
     
     def logout(self):
         # Stop the auto-refresh timer
@@ -1342,6 +1403,8 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted:
             updated_data = dialog.get_event_data()
             try:
+                import tzlocal
+                local_tz = tzlocal.get_localzone_name()
                 event = {
                     'summary': updated_data['name'],
                     'location': updated_data['location'],
@@ -1355,11 +1418,11 @@ class MainWindow(QMainWindow):
                 else:
                     event['start'] = {
                         'dateTime': updated_data['start'].isoformat(),
-                        'timeZone': 'UTC',
+                        'timeZone': local_tz,
                     }
                     event['end'] = {
                         'dateTime': updated_data['end'].isoformat(),
-                        'timeZone': 'UTC',
+                        'timeZone': local_tz,
                     }
                 
                 # Preserve any existing fields that we don't update
@@ -1372,8 +1435,7 @@ class MainWindow(QMainWindow):
                     eventId=event_data['id'],
                     body=event
                 ).execute()
-                
-                QMessageBox.information(self, tr('success'), tr('event_update_success'))
+                self.show_snackbar(tr('event_update_success'))
                 
                 # Force a refresh from the server
                 QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
@@ -1396,8 +1458,7 @@ class MainWindow(QMainWindow):
                     calendarId=self.calendar_id,
                     eventId=event_data['id']
                 ).execute()
-                
-                QMessageBox.information(self, tr('success'), tr('event_deleted'))
+                self.show_snackbar(tr('event_deleted'))
                 
                 # Force a refresh from the server
                 QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
@@ -1422,6 +1483,10 @@ class MainWindow(QMainWindow):
                 self.change_language("en")
             # Apply theme
             self.change_theme(settings['theme'].lower())
+
+    def show_snackbar(self, message, duration=3000):
+        """Show a temporary notification at the bottom of the window."""
+        self.snackbar.show_snackbar(message, duration)
 
 # Translation dictionary for all user-facing strings
 TRANSLATIONS = {

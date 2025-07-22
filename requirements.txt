@@ -8,4 +8,9 @@ torch==2.2.2
 google-api-python-client==2.126.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.0
+requests==2.31.0
+setuptools==69.2.0
+# pillow==10.3.0         # Uncomment if you need image manipulation
+# pytest==8.1.1          # Uncomment for testing
 # System dependencies required: ffmpeg (must be in PATH), CUDA (for GPU acceleration, optional) 
+tzlocal 
