@@ -1,16 +1,32 @@
+# Core GUI Framework
 PyQt5==5.15.11
 qtawesome==1.4.0
+
+# Scientific Computing & Audio Processing
 numpy==1.26.4
-sounddevice==0.4.6
 scipy==1.11.4
-openai-whisper==20230314
+sounddevice==0.4.6
+
+# Machine Learning & Speech Recognition
 torch==2.2.2
+openai-whisper==20230314
+
+# Google Calendar API
 google-api-python-client==2.126.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.0
+
+# HTTP Requests & Utilities
 requests==2.31.0
 setuptools==69.2.0
-# pillow==10.3.0         # Uncomment if you need image manipulation
-# pytest==8.1.1          # Uncomment for testing
-# System dependencies required: ffmpeg (must be in PATH), CUDA (for GPU acceleration, optional) 
-tzlocal 
+
+# Time Zone Support
+tzlocal==5.2
+
+# Optional Dependencies (uncomment if needed)
+# pillow==10.3.0         # For image manipulation
+# pytest==8.1.1          # For testing
+
+# System Dependencies Required:
+# - ffmpeg (must be in PATH for audio processing)
+# - CUDA (optional, for GPU acceleration with torch) 
