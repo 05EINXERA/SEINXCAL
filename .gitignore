@@ -1,11 +1,7 @@
-seinxenv/
 credentials.json
 token.json
-myenv/
-output/
-*.ico
-*.png
-*.jpg
-tenv/
+*.iss
 *.log
-setup_/
+*.spec
+build/
+tenv/
