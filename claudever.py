@@ -19,8 +19,9 @@ import whisper
 import qtawesome as qta
 
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTime, QEvent, QSettings, QPropertyAnimation, QEasingCurve
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit, QCompleter)
 from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence, QPainter
+from PyQt5.QtCore import QStringListModel
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -116,6 +117,30 @@ class NamePersistenceManager:
         """Get names that start with the given prefix."""
         prefix = prefix.lower()
         return [name for name in self.names if name.lower().startswith(prefix)]
+    
+    def get_recent_names(self, count=3):
+        """Get the most recent names (last added)."""
+        return list(self.names)[-count:] if self.names else []
+    
+    def fuzzy_search(self, query, max_results=10):
+        """Fuzzy search for names containing the query anywhere."""
+        if not query:
+            return []
+        
+        query = query.lower()
+        results = []
+        
+        for name in self.names:
+            name_lower = name.lower()
+            # Check if query is contained anywhere in the name
+            if query in name_lower:
+                # Prioritize names that start with the query
+                if name_lower.startswith(query):
+                    results.insert(0, name)  # Add to beginning for priority
+                else:
+                    results.append(name)
+        
+        return results[:max_results]
 
 # Global name persistence manager instance
 name_manager = NamePersistenceManager()
@@ -543,75 +568,43 @@ class AddEventDialog(QDialog):
         name_label = QLabel(tr('event_name'))
         name_label.setFixedWidth(80)  # Fixed width for label consistency
         
-        self.name_edit = QComboBox()
-        self.name_edit.setEditable(True)
-        self.name_edit.setInsertPolicy(QComboBox.NoInsert)
-        self.name_edit.setMaxVisibleItems(10)
+        self.name_edit = QLineEdit()
         
-        # Remove dropdown arrow and make it look like a modern input field
+        # Create completer for autocomplete functionality
+        self.name_completer = QCompleter()
+        self.name_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.name_completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.name_completer.setMaxVisibleItems(8)
+        self.name_edit.setCompleter(self.name_completer)
+        
+        # Custom styling for modern input field
         if AppSettings.theme == 'dark':
             self.name_edit.setStyleSheet("""
-                QComboBox {
+                QLineEdit {
                     border: 1px solid #555;
                     border-radius: 4px;
                     padding: 5px;
                     background-color: #2c313a;
                     color: white;
                     min-height: 20px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox QAbstractItemView {
-                    border: 1px solid #555;
-                    border-radius: 4px;
-                    background-color: #2c313a;
-                    color: white;
-                    selection-background-color: #0078d4;
-                    selection-color: white;
                 }
             """)
         else:
             self.name_edit.setStyleSheet("""
-                QComboBox {
+                QLineEdit {
                     border: 1px solid #ccc;
                     border-radius: 4px;
                     padding: 5px;
                     background-color: white;
                     min-height: 20px;
                 }
-                QComboBox::drop-down {
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox QAbstractItemView {
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                    background-color: white;
-                    selection-background-color: #0078d4;
-                    selection-color: white;
-                }
             """)
         
-        # Don't load saved names initially - keep field empty
-        # self.load_saved_names()  # Removed - will load only when typing
-        
         # Connect text changed signal for dynamic suggestions
-        self.name_edit.currentTextChanged.connect(self.on_name_text_changed)
+        self.name_edit.textChanged.connect(self.on_name_text_changed)
         
         self.name_speech = SpeechToTextWidget(target_field=self.name_edit)
-        self.name_speech.textCaptured.connect(lambda text: self.name_edit.setCurrentText(text))
+        self.name_speech.textCaptured.connect(lambda text: self.name_edit.setText(text))
         
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit, 1)  # Make it expand to fill available space
@@ -712,42 +705,18 @@ class AddEventDialog(QDialog):
         self.remarks_edit.setAccessibleName("Remarks")
         self.all_day_check.setAccessibleName("All Day Event Checkbox")
     
-    def showEvent(self, event):
-        """Override to ensure field is empty when dialog is shown."""
-        super().showEvent(event)
-        # Keep the field empty initially - suggestions will appear when typing
-        self.name_edit.clear()
-        self.name_edit.setCurrentText("")
-    
     def update_field_styling(self):
         """Update input field styling based on current theme."""
         if AppSettings.theme == 'dark':
             # Dark theme styling for name field
             self.name_edit.setStyleSheet("""
-                QComboBox {
+                QLineEdit {
                     border: 1px solid #555;
                     border-radius: 4px;
                     padding: 5px;
                     background-color: #2c313a;
                     color: white;
                     min-height: 20px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox QAbstractItemView {
-                    border: 1px solid #555;
-                    border-radius: 4px;
-                    background-color: #2c313a;
-                    color: white;
-                    selection-background-color: #0078d4;
-                    selection-color: white;
                 }
             """)
             # Dark theme styling for location field
@@ -764,28 +733,12 @@ class AddEventDialog(QDialog):
         else:
             # Light theme styling for name field
             self.name_edit.setStyleSheet("""
-                QComboBox {
+                QLineEdit {
                     border: 1px solid #ccc;
                     border-radius: 4px;
                     padding: 5px;
                     background-color: white;
                     min-height: 20px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border: none;
-                    width: 0px;
-                }
-                QComboBox QAbstractItemView {
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                    background-color: white;
-                    selection-background-color: #0078d4;
-                    selection-color: white;
                 }
             """)
             # Light theme styling for location field
@@ -804,56 +757,43 @@ class AddEventDialog(QDialog):
         self.location_speech.update_theme()
     
     def load_saved_names(self):
-        """Load saved names into the combobox for suggestions."""
+        """Load saved names into the completer for suggestions."""
         try:
             saved_names = name_manager.get_names()
-            self.name_edit.clear()
-            self.name_edit.addItems(saved_names)
-            logger.info(f"Loaded {len(saved_names)} saved names into combobox")
+            model = QStringListModel(saved_names)
+            self.name_completer.setModel(model)
+            logger.info(f"Loaded {len(saved_names)} saved names into completer")
         except Exception as e:
             logger.error(f"Error loading saved names: {e}")
     
+
+    
     def on_name_text_changed(self, text):
-        """Handle text changes to show dynamic suggestions."""
+        """Handle text changes to show dynamic suggestions with fuzzy search."""
         try:
-            # Temporarily disconnect to avoid recursive calls
-            try:
-                self.name_edit.currentTextChanged.disconnect(self.on_name_text_changed)
-            except TypeError:
-                pass
-            
-            # Store current cursor position
-            cursor_pos = self.name_edit.lineEdit().cursorPosition()
-            
             if not text:
-                # If text is empty, clear suggestions
-                self.name_edit.clear()
+                # If text is empty, show recent names
+                recent_names = name_manager.get_recent_names(3)
+                model = QStringListModel(recent_names)
+                self.name_completer.setModel(model)
             else:
-                # Get matching names for autocompletion
-                matching_names = name_manager.get_names_starting_with(text)
-                
-                # Clear current items and add matching suggestions
-                self.name_edit.clear()
-                for name in matching_names:
-                    self.name_edit.addItem(name)
-                
-                # Restore the user's text
-                self.name_edit.setCurrentText(text)
-                
-                # Restore cursor position
-                if cursor_pos <= len(text):
-                    self.name_edit.lineEdit().setCursorPosition(cursor_pos)
-            
-            # Reconnect the signal
-            self.name_edit.currentTextChanged.connect(self.on_name_text_changed)
+                # Use fuzzy search for better matching
+                matching_names = name_manager.fuzzy_search(text, max_results=8)
+                model = QStringListModel(matching_names)
+                self.name_completer.setModel(model)
                 
         except Exception as e:
             logger.error(f"Error in name suggestions: {e}")
-            # Try to reconnect the signal if there was an error
-            try:
-                self.name_edit.currentTextChanged.connect(self.on_name_text_changed)
-            except:
-                pass
+    
+    def showEvent(self, event):
+        """Override to ensure field is empty when dialog is shown."""
+        super().showEvent(event)
+        # Keep the field empty initially - suggestions will appear when typing
+        self.name_edit.clear()
+        # Show recent names when dialog opens
+        recent_names = name_manager.get_recent_names(3)
+        model = QStringListModel(recent_names)
+        self.name_completer.setModel(model)
     
     def setup_datetime_section(self, date_edit, label, show_time=True):
         # Create a horizontal layout for the date/time section
@@ -898,7 +838,7 @@ class AddEventDialog(QDialog):
         def sanitize(text, maxlen=256):
             return ''.join(c for c in text.strip() if c.isprintable())[:maxlen]
         
-        event_name = sanitize(self.name_edit.currentText())
+        event_name = sanitize(self.name_edit.text())
         
         # Save the name for future autocomplete
         if event_name:
@@ -1126,7 +1066,7 @@ class UpdateEventDialog(AddEventDialog):
         self.setWindowTitle(tr('update_event_title'))
         
         # Pre-fill the fields with existing event data
-        self.name_edit.setCurrentText(event_data.get('summary', ''))
+        self.name_edit.setText(event_data.get('summary', ''))
         self.location_edit.setText(event_data.get('location', ''))
         self.remarks_edit.setText(event_data.get('description', ''))
         
