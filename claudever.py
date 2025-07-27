@@ -788,12 +788,12 @@ class AddEventDialog(QDialog):
     def showEvent(self, event):
         """Override to ensure field is empty when dialog is shown."""
         super().showEvent(event)
-        # Keep the field empty initially - suggestions will appear when typing
-        self.name_edit.clear()
-        # Show recent names when dialog opens
-        recent_names = name_manager.get_recent_names(3)
-        model = QStringListModel(recent_names)
-        self.name_completer.setModel(model)
+        # Only clear the field if it's empty (for new events)
+        if not self.name_edit.text():
+            # Show recent names when dialog opens for new events
+            recent_names = name_manager.get_recent_names(3)
+            model = QStringListModel(recent_names)
+            self.name_completer.setModel(model)
     
     def setup_datetime_section(self, date_edit, label, show_time=True):
         # Create a horizontal layout for the date/time section
