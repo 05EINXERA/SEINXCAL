@@ -65,6 +65,62 @@ sys.excepthook = handle_exception
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 # -----------------------------
+# Name Persistence Manager
+# -----------------------------
+class NamePersistenceManager:
+    """
+    Manages saving and loading of event names for autocomplete functionality.
+    Saves names to a local text file and provides methods to add/retrieve names.
+    """
+    
+    def __init__(self, filename='saved_names.txt'):
+        self.filename = filename
+        self.names = set()
+        self.load_names()
+    
+    def load_names(self):
+        """Load saved names from the text file."""
+        try:
+            if os.path.exists(self.filename):
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    names = f.read().strip().split('\n')
+                    self.names = {name.strip() for name in names if name.strip()}
+                logger.info(f"Loaded {len(self.names)} saved names from {self.filename}")
+        except Exception as e:
+            logger.error(f"Error loading names from {self.filename}: {e}")
+            self.names = set()
+    
+    def save_names(self):
+        """Save names to the text file."""
+        try:
+            with open(self.filename, 'w', encoding='utf-8') as f:
+                for name in sorted(self.names):
+                    f.write(f"{name}\n")
+            logger.info(f"Saved {len(self.names)} names to {self.filename}")
+        except Exception as e:
+            logger.error(f"Error saving names to {self.filename}: {e}")
+    
+    def add_name(self, name):
+        """Add a new name to the saved list."""
+        if name and name.strip():
+            name = name.strip()
+            self.names.add(name)
+            self.save_names()
+            logger.info(f"Added name: {name}")
+    
+    def get_names(self):
+        """Get all saved names as a sorted list."""
+        return sorted(list(self.names))
+    
+    def get_names_starting_with(self, prefix):
+        """Get names that start with the given prefix."""
+        prefix = prefix.lower()
+        return [name for name in self.names if name.lower().startswith(prefix)]
+
+# Global name persistence manager instance
+name_manager = NamePersistenceManager()
+
+# -----------------------------
 # WhisperWorker: Handles audio recording and transcription
 # -----------------------------
 class WhisperWorker(QThread):
@@ -149,13 +205,50 @@ class SpeechToTextWidget(QWidget):
         super().__init__(parent)
         self.target_field = target_field
         layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
         self.mic_button = QPushButton()
+        self.mic_button.setFixedSize(30, 30)  # Make it square
         if AppSettings.theme == 'dark':
             self.mic_button.setIcon(qta.icon('fa5s.microphone', color='white'))
         else:
             self.mic_button.setIcon(qta.icon('fa5s.microphone'))
         self.mic_button.setToolTip("Click to use voice input for this field")
         self.mic_button.clicked.connect(self.start_listening)
+        
+        # Style the button to be square and compact
+        if AppSettings.theme == 'dark':
+            self.mic_button.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    background-color: #2c313a;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #3c414a;
+                }
+                QPushButton:pressed {
+                    background-color: #1c212a;
+                }
+            """)
+        else:
+            self.mic_button.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: #f8f9fa;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #e9ecef;
+                }
+                QPushButton:pressed {
+                    background-color: #dee2e6;
+                }
+            """)
+        
         layout.addWidget(self.mic_button)
         self.setLayout(layout)
         self.worker = None
@@ -197,6 +290,41 @@ class SpeechToTextWidget(QWidget):
         """Update tooltip with current status."""
         self.overlay.update_status(status)
         self.mic_button.setToolTip(status)
+    
+    def update_theme(self):
+        """Update button styling when theme changes."""
+        if AppSettings.theme == 'dark':
+            self.mic_button.setIcon(qta.icon('fa5s.microphone', color='white'))
+            self.mic_button.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    background-color: #2c313a;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #3c414a;
+                }
+                QPushButton:pressed {
+                    background-color: #1c212a;
+                }
+            """)
+        else:
+            self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+            self.mic_button.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: #f8f9fa;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #e9ecef;
+                }
+                QPushButton:pressed {
+                    background-color: #dee2e6;
+                }
+            """)
 
 
 class ListeningOverlay(QWidget):
@@ -407,16 +535,86 @@ class AddEventDialog(QDialog):
         
         layout = QVBoxLayout()
         
-        # Event name with speech input
+        # Event name with speech input and suggestions
         name_container = QWidget()
         name_layout = QHBoxLayout(name_container)
         name_layout.setContentsMargins(0, 0, 0, 0)
+        name_layout.setSpacing(5)
         name_label = QLabel(tr('event_name'))
-        self.name_edit = QLineEdit()
+        name_label.setFixedWidth(80)  # Fixed width for label consistency
+        
+        self.name_edit = QComboBox()
+        self.name_edit.setEditable(True)
+        self.name_edit.setInsertPolicy(QComboBox.NoInsert)
+        self.name_edit.setMaxVisibleItems(10)
+        
+        # Remove dropdown arrow and make it look like a modern input field
+        if AppSettings.theme == 'dark':
+            self.name_edit.setStyleSheet("""
+                QComboBox {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: #2c313a;
+                    color: white;
+                    min-height: 20px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox QAbstractItemView {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    background-color: #2c313a;
+                    color: white;
+                    selection-background-color: #0078d4;
+                    selection-color: white;
+                }
+            """)
+        else:
+            self.name_edit.setStyleSheet("""
+                QComboBox {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: white;
+                    min-height: 20px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox QAbstractItemView {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: white;
+                    selection-background-color: #0078d4;
+                    selection-color: white;
+                }
+            """)
+        
+        # Don't load saved names initially - keep field empty
+        # self.load_saved_names()  # Removed - will load only when typing
+        
+        # Connect text changed signal for dynamic suggestions
+        self.name_edit.currentTextChanged.connect(self.on_name_text_changed)
+        
         self.name_speech = SpeechToTextWidget(target_field=self.name_edit)
-        self.name_speech.textCaptured.connect(lambda text: self.name_edit.setText(text))
+        self.name_speech.textCaptured.connect(lambda text: self.name_edit.setCurrentText(text))
+        
         name_layout.addWidget(name_label)
-        name_layout.addWidget(self.name_edit)
+        name_layout.addWidget(self.name_edit, 1)  # Make it expand to fill available space
         name_layout.addWidget(self.name_speech)
         layout.addWidget(name_container)
         
@@ -424,12 +622,37 @@ class AddEventDialog(QDialog):
         location_container = QWidget()
         location_layout = QHBoxLayout(location_container)
         location_layout.setContentsMargins(0, 0, 0, 0)
+        location_layout.setSpacing(5)
         location_label = QLabel(tr('location_label'))
+        location_label.setFixedWidth(80)  # Fixed width for label consistency
+        
         self.location_edit = QLineEdit()
+        if AppSettings.theme == 'dark':
+            self.location_edit.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: #2c313a;
+                    color: white;
+                    min-height: 20px;
+                }
+            """)
+        else:
+            self.location_edit.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: white;
+                    min-height: 20px;
+                }
+            """)
+        
         self.location_speech = SpeechToTextWidget(target_field=self.location_edit)
         self.location_speech.textCaptured.connect(lambda text: self.location_edit.setText(text))
         location_layout.addWidget(location_label)
-        location_layout.addWidget(self.location_edit)
+        location_layout.addWidget(self.location_edit, 1)  # Make it expand to fill available space
         location_layout.addWidget(self.location_speech)
         layout.addWidget(location_container)
         
@@ -489,6 +712,149 @@ class AddEventDialog(QDialog):
         self.remarks_edit.setAccessibleName("Remarks")
         self.all_day_check.setAccessibleName("All Day Event Checkbox")
     
+    def showEvent(self, event):
+        """Override to ensure field is empty when dialog is shown."""
+        super().showEvent(event)
+        # Keep the field empty initially - suggestions will appear when typing
+        self.name_edit.clear()
+        self.name_edit.setCurrentText("")
+    
+    def update_field_styling(self):
+        """Update input field styling based on current theme."""
+        if AppSettings.theme == 'dark':
+            # Dark theme styling for name field
+            self.name_edit.setStyleSheet("""
+                QComboBox {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: #2c313a;
+                    color: white;
+                    min-height: 20px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox QAbstractItemView {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    background-color: #2c313a;
+                    color: white;
+                    selection-background-color: #0078d4;
+                    selection-color: white;
+                }
+            """)
+            # Dark theme styling for location field
+            self.location_edit.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: #2c313a;
+                    color: white;
+                    min-height: 20px;
+                }
+            """)
+        else:
+            # Light theme styling for name field
+            self.name_edit.setStyleSheet("""
+                QComboBox {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: white;
+                    min-height: 20px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border: none;
+                    width: 0px;
+                }
+                QComboBox QAbstractItemView {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: white;
+                    selection-background-color: #0078d4;
+                    selection-color: white;
+                }
+            """)
+            # Light theme styling for location field
+            self.location_edit.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    padding: 5px;
+                    background-color: white;
+                    min-height: 20px;
+                }
+            """)
+        
+        # Update microphone button styling too
+        self.name_speech.update_theme()
+        self.location_speech.update_theme()
+    
+    def load_saved_names(self):
+        """Load saved names into the combobox for suggestions."""
+        try:
+            saved_names = name_manager.get_names()
+            self.name_edit.clear()
+            self.name_edit.addItems(saved_names)
+            logger.info(f"Loaded {len(saved_names)} saved names into combobox")
+        except Exception as e:
+            logger.error(f"Error loading saved names: {e}")
+    
+    def on_name_text_changed(self, text):
+        """Handle text changes to show dynamic suggestions."""
+        try:
+            # Temporarily disconnect to avoid recursive calls
+            try:
+                self.name_edit.currentTextChanged.disconnect(self.on_name_text_changed)
+            except TypeError:
+                pass
+            
+            # Store current cursor position
+            cursor_pos = self.name_edit.lineEdit().cursorPosition()
+            
+            if not text:
+                # If text is empty, clear suggestions
+                self.name_edit.clear()
+            else:
+                # Get matching names for autocompletion
+                matching_names = name_manager.get_names_starting_with(text)
+                
+                # Clear current items and add matching suggestions
+                self.name_edit.clear()
+                for name in matching_names:
+                    self.name_edit.addItem(name)
+                
+                # Restore the user's text
+                self.name_edit.setCurrentText(text)
+                
+                # Restore cursor position
+                if cursor_pos <= len(text):
+                    self.name_edit.lineEdit().setCursorPosition(cursor_pos)
+            
+            # Reconnect the signal
+            self.name_edit.currentTextChanged.connect(self.on_name_text_changed)
+                
+        except Exception as e:
+            logger.error(f"Error in name suggestions: {e}")
+            # Try to reconnect the signal if there was an error
+            try:
+                self.name_edit.currentTextChanged.connect(self.on_name_text_changed)
+            except:
+                pass
+    
     def setup_datetime_section(self, date_edit, label, show_time=True):
         # Create a horizontal layout for the date/time section
         section_layout = QHBoxLayout()
@@ -531,8 +897,15 @@ class AddEventDialog(QDialog):
         # Sanitize user input: strip, limit length, remove dangerous chars
         def sanitize(text, maxlen=256):
             return ''.join(c for c in text.strip() if c.isprintable())[:maxlen]
+        
+        event_name = sanitize(self.name_edit.currentText())
+        
+        # Save the name for future autocomplete
+        if event_name:
+            name_manager.add_name(event_name)
+        
         return {
-            'name': sanitize(self.name_edit.text()),
+            'name': event_name,
             'location': sanitize(self.location_edit.text()),
             'start': start_dt.date() if is_all_day else start_dt,
             'end': end_dt.date() if is_all_day else end_dt,
@@ -563,7 +936,8 @@ class CalendarTable(QTableWidget):
         self.setColumnWidth(2, int(total_width * 0.18))
         self.setColumnWidth(3, int(total_width * 0.18))
         # Remarks column (index 4) will adjust automatically due to Stretch mode
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # Disable default selection behavior to prevent interference with custom highlighting
+        self.setSelectionMode(QAbstractItemView.NoSelection)
         self.setAlternatingRowColors(True)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.cellClicked.connect(self.handle_event_cell_click)
@@ -578,20 +952,40 @@ class CalendarTable(QTableWidget):
         # Hide row numbers
         self.verticalHeader().setVisible(False)
     def handle_event_cell_click(self, row, column):
-        # Highlight the clicked row with a darker color
+        # Check if clicking on the same row that's already highlighted
+        if self.highlighted_row == row:
+            # Toggle off - remove highlighting and hide action buttons
+            self.hide_actions_widget()
+            # Directly clear the highlight for this specific row
+            for col in range(self.columnCount()):
+                item = self.item(row, col)
+                if item:
+                    if AppSettings.theme == 'dark':
+                        item.setBackground(QColor('#2c313a'))
+                    else:
+                        item.setBackground(QColor('white'))
+            self.highlighted_row = None
+            self.viewport().update()
+            return
+        
+        # Highlight the clicked row with blue color
         self.clear_highlight()
         for col in range(self.columnCount()):
             item = self.item(row, col)
             if item:
-                item.setBackground(QColor("#b0b0b0"))  # Darker highlight
+                item.setBackground(QColor("#0078d4"))  # Blue highlight
         self.highlighted_row = row
-        # Only show actions for event rows (not empty, not separator)
+        
+        # Check if this is an empty row (no event data)
         item = self.item(row, 0)
         if item is None or item.text() == "":
-            self.parent_app.add_event()
+            # Show add button for empty rows
+            self.show_add_button(row)
             return
         if item.text() == "Upcoming Events":
             return
+            
+        # Show edit/delete actions for existing events
         if self.actions_widget:
             self.actions_widget.hide()
             self.actions_widget.deleteLater()
@@ -599,6 +993,40 @@ class CalendarTable(QTableWidget):
         self.setMouseTracking(True)
         # Keep actions visible for 5 seconds unless user clicks elsewhere
         self.actions_timer.start(5000)
+    def show_add_button(self, row):
+        """Show add button for empty rows."""
+        if self.actions_widget:
+            self.actions_widget.hide()
+            self.actions_widget.deleteLater()
+        
+        self.actions_widget = QWidget(self)
+        layout = QHBoxLayout(self.actions_widget)
+        layout.setSpacing(3)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        add_btn = QPushButton(self.actions_widget)
+        if AppSettings.theme == 'dark':
+            add_icon = QIcon('icons/add_white.png') if os.path.exists('icons/add_white.png') else qta.icon('fa5s.plus', color='white')
+        else:
+            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus')
+        
+        add_btn.setIcon(add_icon)
+        add_btn.setToolTip('Add Event')
+        add_btn.setStyleSheet('border: none; background: transparent; color: white;')
+        add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.clicked.connect(self.parent_app.add_event)
+        
+        layout.addWidget(add_btn)
+        
+        rect = self.visualItemRect(self.item(row, 4))
+        self.actions_widget.setFixedSize(40, rect.height()-2)
+        horizontal_pos = rect.x() + rect.width() - 45
+        vertical_pos = rect.y() - 1
+        if horizontal_pos < rect.x():
+            horizontal_pos = rect.x() + 5
+        self.actions_widget.move(horizontal_pos, vertical_pos)
+        self.actions_widget.show()
+    
     def show_actions_widget(self, row):
         event_data = self.event_data.get(row)
         if not event_data:
@@ -642,7 +1070,12 @@ class CalendarTable(QTableWidget):
             self.actions_widget.hide()
             self.actions_widget.deleteLater()
             self.actions_widget = None
+        # Stop the timer to prevent it from showing actions again
+        self.actions_timer.stop()
+        # Explicitly clear the highlight
         self.clear_highlight()
+        # Force a repaint to ensure the highlight is removed
+        self.viewport().update()
     def clear_highlight(self):
         if self.highlighted_row is not None:
             for col in range(self.columnCount()):
@@ -693,7 +1126,7 @@ class UpdateEventDialog(AddEventDialog):
         self.setWindowTitle(tr('update_event_title'))
         
         # Pre-fill the fields with existing event data
-        self.name_edit.setText(event_data.get('summary', ''))
+        self.name_edit.setCurrentText(event_data.get('summary', ''))
         self.location_edit.setText(event_data.get('location', ''))
         self.remarks_edit.setText(event_data.get('description', ''))
         
@@ -738,6 +1171,12 @@ class UpdateEventDialog(AddEventDialog):
             QDate(end_dt.year, end_dt.month, end_dt.day),
             QTime(end_dt.hour, end_dt.minute)
         ))
+    
+    def get_event_data(self):
+        """Override to ensure name persistence works for updates too."""
+        event_data = super().get_event_data()
+        # The parent class already handles name persistence
+        return event_data
 
 # -----------------------------
 # SettingsDialog: Simple settings for language and theme

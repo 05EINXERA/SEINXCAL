@@ -1,27 +1,27 @@
 # Core GUI Framework
-PyQt5==5.15.11
-qtawesome==1.4.0
+PyQt5
+qtawesome
 
 # Scientific Computing & Audio Processing
-numpy==1.26.4
-scipy==1.11.4
-sounddevice==0.4.6
+numpy
+scipy
+sounddevice
 
 # Machine Learning & Speech Recognition
-torch==2.2.2
-openai-whisper==20230314
+torch
+openai-whisper
 
 # Google Calendar API
-google-api-python-client==2.126.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
 
 # HTTP Requests & Utilities
-requests==2.31.0
-setuptools==69.2.0
+requests
+setuptools
 
 # Time Zone Support
-tzlocal==5.2
+tzlocal
 
 # Optional Dependencies (uncomment if needed)
 # pillow==10.3.0         # For image manipulation

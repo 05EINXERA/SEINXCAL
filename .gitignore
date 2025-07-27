@@ -5,3 +5,5 @@ token.json
 *.spec
 build/
 tenv/
+__pycache__/
+saved_names.txt
