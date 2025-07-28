@@ -278,6 +278,7 @@ class SpeechToTextWidget(QWidget):
         self.setLayout(layout)
         self.worker = None
         self.language = "en"
+        self.auto_submit = False  # Default to manual submit
         # Use ListeningOverlay as a spinner overlay
         self.overlay = ListeningOverlay(self)
         self.overlay.hide()
@@ -286,6 +287,10 @@ class SpeechToTextWidget(QWidget):
         self.language = lang
         if self.worker is not None:
             self.worker.set_language(lang)
+    
+    def set_auto_submit(self, enabled):
+        """Set auto-submit mode for speech recognition."""
+        self.auto_submit = enabled
     def start_listening(self):
         """Start recording and transcribing audio."""
         self.mic_button.setEnabled(False)
@@ -1017,6 +1022,11 @@ class CalendarTable(QTableWidget):
         # Hide row numbers
         self.verticalHeader().setVisible(False)
     def handle_event_cell_click(self, row, column):
+        # Check if clicking on separator rows (don't highlight them)
+        item = self.item(row, 0)
+        if item and (item.data(Qt.UserRole) == 'date_separator' or item.data(Qt.UserRole) == 'breaker'):
+            return  # Don't highlight separator rows
+        
         # Check if clicking on the same row that's already highlighted
         if self.highlighted_row == row:
             # Toggle off - remove highlighting and hide action buttons
@@ -1569,10 +1579,15 @@ class MainWindow(QMainWindow):
         for widget in self.findChildren(QWidget):
             if hasattr(widget, 'refresh_language'):
                 widget.refresh_language()
+        # Show appropriate message based on language
+        if lang == 'ja':
+            message = '言語が日本語に変更されました'
+        else:
+            message = 'Language changed to English'
         QMessageBox.information(
             self,
             tr('language', lang),
-            tr('language_changed', lang)
+            message
         )
     
     def change_speech_language(self, lang):
@@ -1717,6 +1732,15 @@ class MainWindow(QMainWindow):
                 self.today_btn.setVisible(False)
     
     def add_event(self):
+        if self.is_date_specific_view:
+            # Show message that add event is disabled in date search mode
+            QMessageBox.information(
+                self, 
+                tr('add_event'), 
+                tr('add_disabled_in_search')
+            )
+            return
+        
         dialog = AddEventDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             event_data = dialog.get_event_data()
@@ -2177,6 +2201,7 @@ TRANSLATIONS = {
         'fri': 'Fri',
         'sat': 'Sat',
         'events_for_date': 'Events for {date}',
+        'add_disabled_in_search': 'Adding events is disabled in date search mode. Please use "Today" button to return to normal view.',
     },
     'ja': {
         'language': '言語',
@@ -2248,6 +2273,7 @@ TRANSLATIONS = {
         'fri': '金',
         'sat': '土',
         'events_for_date': '{date}のイベント',
+        'add_disabled_in_search': '日付検索モードではイベント追加が無効です。「今日」ボタンを使用して通常表示に戻してください。',
     }
 }
 
