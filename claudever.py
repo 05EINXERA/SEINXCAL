@@ -22,6 +22,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTim
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit, QCompleter)
 from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence, QPainter
 from PyQt5.QtCore import QStringListModel
+from PyQt5.QtGui import QMovie
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -64,6 +65,179 @@ sys.excepthook = handle_exception
 # Google Calendar API Scope
 # -----------------------------
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+# -----------------------------
+# Token Management Class
+# -----------------------------
+class TokenManager:
+    """
+    Manages Google OAuth tokens including automatic refresh and persistence.
+    Handles token validation, refresh, and storage.
+    """
+    
+    def __init__(self):
+        self.token_file = 'token.json'
+        self.credentials = None
+    
+    def load_credentials(self):
+        """Load credentials from token.json file."""
+        try:
+            if os.path.exists(self.token_file):
+                self.credentials = Credentials.from_authorized_user_file(self.token_file, SCOPES)
+                logger.info("Credentials loaded from token.json")
+                return self.credentials
+            else:
+                logger.info("No token.json file found")
+                return None
+        except Exception as e:
+            logger.error(f"Error loading credentials: {e}")
+            return None
+    
+    def is_token_valid(self, credentials=None):
+        """Check if the token is valid and not expired."""
+        if credentials is None:
+            credentials = self.credentials
+        
+        if not credentials:
+            return False
+        
+        # Check if token is expired
+        if credentials.expired:
+            logger.info("Token is expired")
+            return False
+        
+        # Check if we have a refresh token
+        if not credentials.refresh_token:
+            logger.warning("No refresh token available")
+            return False
+        
+        return True
+    
+    def refresh_token_if_needed(self, credentials=None):
+        """Refresh the token if it's expired."""
+        if credentials is None:
+            credentials = self.credentials
+        
+        if not credentials:
+            return None
+        
+        try:
+            if credentials.expired and credentials.refresh_token:
+                logger.info("Refreshing expired token...")
+                credentials.refresh(Request())
+                logger.info("Token refreshed successfully")
+                
+                # Save the refreshed token
+                self.save_credentials(credentials)
+                return credentials
+            elif credentials.expired and not credentials.refresh_token:
+                logger.error("Token expired and no refresh token available")
+                return None
+            else:
+                logger.info("Token is still valid")
+                return credentials
+        except Exception as e:
+            logger.error(f"Error refreshing token: {e}")
+            # Check if it's a specific error that we can handle
+            if "invalid_grant" in str(e).lower():
+                logger.error("Refresh token is invalid or revoked. User needs to re-authenticate.")
+            elif "network" in str(e).lower() or "connection" in str(e).lower():
+                logger.error("Network error during token refresh. Please check your internet connection.")
+            return None
+    
+    def save_credentials(self, credentials=None):
+        """Save credentials to token.json file."""
+        if credentials is None:
+            credentials = self.credentials
+        
+        if not credentials:
+            logger.error("No credentials to save")
+            return False
+        
+        try:
+            with open(self.token_file, 'w') as token:
+                token.write(credentials.to_json())
+            logger.info("Credentials saved to token.json")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving credentials: {e}")
+            return False
+    
+    def get_valid_credentials(self):
+        """Get valid credentials, refreshing if necessary."""
+        # Load credentials if not already loaded
+        if not self.credentials:
+            self.credentials = self.load_credentials()
+        
+        if not self.credentials:
+            return None
+        
+        # Check if token is valid
+        if self.is_token_valid():
+            return self.credentials
+        
+        # Try to refresh the token
+        refreshed_creds = self.refresh_token_if_needed()
+        if refreshed_creds:
+            self.credentials = refreshed_creds
+            return self.credentials
+        
+        return None
+    
+    def get_token_info(self):
+        """Get information about the current token."""
+        if not self.credentials:
+            return None
+        
+        info = {
+            'expired': self.credentials.expired,
+            'has_refresh_token': self.credentials.refresh_token is not None,
+            'expiry': self.credentials.expiry.isoformat() if self.credentials.expiry else None,
+            'scopes': self.credentials.scopes
+        }
+        
+        if self.credentials.expiry:
+            from datetime import datetime
+            now = datetime.now(self.credentials.expiry.tzinfo)
+            time_until_expiry = self.credentials.expiry - now
+            info['seconds_until_expiry'] = time_until_expiry.total_seconds()
+            info['expires_in_hours'] = time_until_expiry.total_seconds() / 3600
+        
+        return info
+    
+    def clear_credentials(self):
+        """Clear stored credentials."""
+        try:
+            if os.path.exists(self.token_file):
+                os.remove(self.token_file)
+                logger.info("Credentials file removed")
+            self.credentials = None
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing credentials: {e}")
+            return False
+    
+    def create_new_credentials(self):
+        """Create new credentials through OAuth flow."""
+        try:
+            if not os.path.exists('credentials.json'):
+                raise FileNotFoundError("credentials.json file is missing")
+            
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            credentials = flow.run_local_server(port=0)
+            
+            # Save the new credentials
+            self.credentials = credentials
+            self.save_credentials()
+            
+            logger.info("New credentials created and saved")
+            return credentials
+        except Exception as e:
+            logger.error(f"Error creating new credentials: {e}")
+            return None
+
+# Global token manager instance
+token_manager = TokenManager()
 
 # -----------------------------
 # Name Persistence Manager
@@ -469,7 +643,7 @@ class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr('login_title'))
-        self.setFixedSize(400, 150)
+        self.setFixedSize(400, 180)  # Increased height for status label
         self.calendar_id = None
         self.credentials = None
         self.user_email = None
@@ -483,6 +657,18 @@ class LoginDialog(QDialog):
         form_layout.addRow(tr('calendar_id'), self.calendar_id_input)
         layout.addLayout(form_layout)
         
+        # Load last used calendar ID
+        settings = QSettings("SEINX", "Calendar")
+        last_calendar_id = settings.value("last_calendar_id", "")
+        if last_calendar_id:
+            self.calendar_id_input.setText(last_calendar_id)
+        
+        # Status label for auto-login feedback
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(self.status_label)
+        
         # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText(tr('ok'))
@@ -493,36 +679,90 @@ class LoginDialog(QDialog):
         
         self.setLayout(layout)
         
+        # Store the last calendar ID for potential auto-login
+        self.last_calendar_id = last_calendar_id
+        
+    def try_auto_login(self):
+        """Attempt to automatically log in using stored token and calendar ID."""
+        try:
+            logger.info("Attempting auto-login...")
+            self.status_label.setText("Attempting auto-login...")
+            QApplication.processEvents()  # Update UI
+            
+            # Use the stored calendar ID directly
+            calendar_id = self.last_calendar_id
+            
+            # Get valid credentials using token manager
+            creds = token_manager.get_valid_credentials()
+            if creds:
+                # Test the connection with stored calendar ID
+                service = build('calendar', 'v3', credentials=creds)
+                calendar = service.calendars().get(calendarId=calendar_id).execute()
+                self.user_email = calendar.get('id', 'Unknown')
+                self.credentials = creds
+                self.calendar_id = calendar_id
+                logger.info("Auto-login successful!")
+                self.status_label.setText("Auto-login successful!")
+                QApplication.processEvents()
+                # Small delay to show success message
+                QTimer.singleShot(1000, self.accept)
+            else:
+                logger.info("No valid credentials available for auto-login")
+                self.status_label.setText("No valid credentials found")
+        except Exception as e:
+            logger.info(f"Auto-login failed: {e}")
+            self.status_label.setText(f"Auto-login failed: {str(e)}")
+            # Auto-login failed, user will need to manually log in
+            pass
+    
+    def showEvent(self, event):
+        """Override to handle auto-login after dialog is shown."""
+        super().showEvent(event)
+        # Try auto-login if we have both token and calendar ID
+        if self.last_calendar_id and os.path.exists('token.json'):
+            logger.info(f"Auto-login conditions met: calendar_id='{self.last_calendar_id}', token exists")
+            # Show initial status
+            self.status_label.setText("Checking stored credentials...")
+            QApplication.processEvents()
+            # Use a timer to delay the auto-login attempt slightly
+            QTimer.singleShot(500, self.try_auto_login)  # Increased delay for better visibility
+        else:
+            logger.info(f"Auto-login conditions not met: calendar_id='{self.last_calendar_id}', token exists={os.path.exists('token.json')}")
+            if not self.last_calendar_id:
+                self.status_label.setText("No stored calendar ID found")
+            elif not os.path.exists('token.json'):
+                self.status_label.setText("No stored token found")
+        
     def login(self):
         self.calendar_id = self.calendar_id_input.text().strip()
         if not self.calendar_id:
             QMessageBox.warning(self, tr('error'), tr('calendar_id'))
             return
         try:
-            creds = None
-            # If token.json exists, use it and do not overwrite
-            if os.path.exists('token.json'):
-                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                    creds = flow.run_local_server(port=0)
-                    # Only write token.json if it does not already exist
-                    if not os.path.exists('token.json'):
-                        try:
-                            with open('token.json', 'w') as token:
-                                token.write(creds.to_json())
-                        except Exception as e:
-                            logger.error(f"Failed to write token.json: {e}")
-                            QMessageBox.critical(self, tr('error'), f"Failed to write token.json: {e}")
-                            return
+            # Try to get valid credentials using token manager
+            creds = token_manager.get_valid_credentials()
+            
+            # If no valid credentials, create new ones
+            if not creds:
+                if not os.path.exists('credentials.json'):
+                    QMessageBox.critical(self, tr('error'), "credentials.json file is missing. Please place your Google API credentials file in the app directory.")
+                    return
+                
+                creds = token_manager.create_new_credentials()
+                if not creds:
+                    QMessageBox.critical(self, tr('error'), "Failed to create new credentials. Please check your credentials.json file.")
+                    return
+            
             # Test the connection with provided calendar ID
             service = build('calendar', 'v3', credentials=creds)
             calendar = service.calendars().get(calendarId=self.calendar_id).execute()
             self.user_email = calendar.get('id', 'Unknown')
             self.credentials = creds
+            
+            # Save the calendar ID for future use
+            settings = QSettings("SEINX", "Calendar")
+            settings.setValue("last_calendar_id", self.calendar_id)
+            
             self.accept()
         except Exception as e:
             logger.error(f"Authentication error: {e}")
@@ -1290,54 +1530,41 @@ class SettingsDialog(QDialog):
 # -----------------------------
 # MainWindow: Main application window
 # -----------------------------
-class Snackbar(QLabel):
-    """
-    A simple snackbar widget for temporary user notifications.
-    Appears at the bottom center of the parent window and fades in/out.
-    """
-    def __init__(self, parent=None):
+class SpinnerDialog(QDialog):
+    def __init__(self, parent=None, message="Loading..."):
         super().__init__(parent)
-        self.setStyleSheet(
-            "background-color: rgba(50, 50, 50, 0.95); color: white; "
-            "border-radius: 8px; padding: 12px 32px; font-size: 15px;"
-        )
-        self.setAlignment(Qt.AlignCenter)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setModal(True)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setVisible(False)
-        self.anim = QPropertyAnimation(self, b"windowOpacity")
-        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
-        self.anim.finished.connect(self._on_fade_out)
-        self._is_showing = False
-    def show_snackbar(self, message, duration=3000):
-        if self._is_showing:
-            self.hide()
-        self.setText(message)
-        self.adjustSize()
-        parent = self.parentWidget()
-        if parent:
-            x = (parent.width() - self.width()) // 2
-            y = parent.height() - self.height() - 40
-            self.move(x, y)
-        self.setWindowOpacity(0.0)
-        self.setVisible(True)
-        self.anim.stop()
-        self.anim.setDuration(250)
-        self.anim.setStartValue(0.0)
-        self.anim.setEndValue(1.0)
-        self.anim.start()
-        QTimer.singleShot(duration, self.fade_out)
-        self._is_showing = True
-    def fade_out(self):
-        self.anim.stop()
-        self.anim.setDuration(400)
-        self.anim.setStartValue(1.0)
-        self.anim.setEndValue(0.0)
-        self.anim.start()
-    def _on_fade_out(self):
-        if self.windowOpacity() == 0.0:
-            self.setVisible(False)
-            self._is_showing = False
+        self.setStyleSheet("""
+            QDialog {
+                background-color: transparent;
+            }
+        """)
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.spinner_label = QLabel(self)
+        self.spinner_label.setAlignment(Qt.AlignCenter)
+        self.spinner_label.setStyleSheet("background: transparent;")
+        gif_path = os.path.join('icons', 'spinner.gif')
+        if os.path.exists(gif_path):
+            self.spinner_movie = QMovie(gif_path)
+            self.spinner_label.setMovie(self.spinner_movie)
+            self.spinner_movie.start()
+        else:
+            self.spinner_label.setText("⏳")
+            self.spinner_label.setStyleSheet("font-size: 48px; color: white; background: transparent;")
+        self.text_label = QLabel(message, self)
+        self.text_label.setStyleSheet("color: white; font-size: 16px; margin-top: 12px; font-weight: bold; background: transparent;")
+        self.text_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.spinner_label)
+        layout.addWidget(self.text_label)
+        self.setFixedSize(300, 200)
+    
+    def set_message(self, message):
+        self.text_label.setText(message)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1377,6 +1604,9 @@ class MainWindow(QMainWindow):
         self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
         self.shortcut_quit.activated.connect(self.close)
         self.snackbar = Snackbar(self)
+        
+        # Auto-show login dialog on startup
+        QTimer.singleShot(100, self.auto_show_login)
     
     def setup_ui(self):
         central_widget = QWidget()
@@ -1550,6 +1780,39 @@ class MainWindow(QMainWindow):
             menu.addAction(tr('login'), self.show_login)
         button_pos = self.cog_btn.mapToGlobal(self.cog_btn.rect().bottomLeft())
         menu.exec_(button_pos)
+    
+    def auto_show_login(self):
+        if not self.service:
+            settings = QSettings("SEINX", "Calendar")
+            last_calendar_id = settings.value("last_calendar_id", "")
+            if last_calendar_id:
+                spinner = SpinnerDialog(self, "Logging in with saved credentials...")
+                def do_login():
+                    try:
+                        creds = token_manager.get_valid_credentials()
+                        if creds:
+                            service = build('calendar', 'v3', credentials=creds)
+                            calendar = service.calendars().get(calendarId=last_calendar_id).execute()
+                            self.calendar_id = last_calendar_id
+                            self.user_email = calendar.get('id', 'Unknown')
+                            self.service = service
+                            calendar_name = calendar.get('summary', self.calendar_id)
+                            self.user_label.setText(calendar_name)
+                            self.load_events()
+                            self.refresh_timer.start()
+                            self.show_snackbar("Auto-login successful!", 2000)
+                            spinner.accept()
+                            return
+                        spinner.accept()
+                    except Exception as e:
+                        logger.info(f"Silent auto-login failed: {e}")
+                        spinner.accept()
+                    self.show_login()
+                # Give the spinner time to render and animate before starting login
+                QTimer.singleShot(1000, do_login)
+                spinner.exec_()
+            else:
+                self.show_login()
     
     def show_login(self):
         login_dialog = LoginDialog(self)
@@ -2013,8 +2276,13 @@ class MainWindow(QMainWindow):
         # Stop the auto-refresh timer
         self.refresh_timer.stop()
         
-        if os.path.exists('token.json'):
-            os.remove('token.json')
+        # Clear credentials using token manager
+        token_manager.clear_credentials()
+        
+        # Clear stored calendar ID
+        settings = QSettings("SEINX", "Calendar")
+        settings.remove("last_calendar_id")
+        
         self.service = None
         self.user_email = ""
         self.calendar_id = None
@@ -2286,6 +2554,57 @@ def tr(key, lang=None):
     if lang is None:
         lang = AppSettings.language
     return TRANSLATIONS.get(lang, TRANSLATIONS['en']).get(key, key)
+
+class Snackbar(QLabel):
+    """
+    A simple snackbar widget for temporary user notifications.
+    Appears at the bottom center of the parent window and fades in/out.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "background-color: rgba(50, 50, 50, 0.95); color: white; "
+            "border-radius: 8px; padding: 12px 32px; font-size: 15px;"
+        )
+        self.setAlignment(Qt.AlignCenter)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self.setVisible(False)
+        self.anim = QPropertyAnimation(self, b"windowOpacity")
+        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self.anim.finished.connect(self._on_fade_out)
+        self._is_showing = False
+
+    def show_snackbar(self, message, duration=3000):
+        if self._is_showing:
+            self.hide()
+        self.setText(message)
+        self.adjustSize()
+        parent = self.parentWidget()
+        if parent:
+            x = (parent.width() - self.width()) // 2
+            y = parent.height() - self.height() - 40
+            self.move(x, y)
+        self.setWindowOpacity(0.0)
+        self.setVisible(True)
+        self.anim.stop()
+        self.anim.setDuration(250)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.start()
+        QTimer.singleShot(duration, self.fade_out)
+        self._is_showing = True
+
+    def fade_out(self):
+        self.anim.stop()
+        self.anim.setDuration(400)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.start()
+
+    def _on_fade_out(self):
+        if self.windowOpacity() == 0.0:
+            self.setVisible(False)
+            self._is_showing = False
 
 if __name__ == "__main__":
     # --- Startup environment checks ---
