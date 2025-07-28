@@ -1555,8 +1555,12 @@ class SpinnerDialog(QDialog):
             self.spinner_movie.start()
         else:
             self.spinner_label.setText("⏳")
-            self.spinner_label.setStyleSheet("font-size: 48px; color: white;")
+            self.spinner_label.setStyleSheet("font-size: 48px; color: white; background: transparent;")
+        self.text_label = QLabel(message, self)
+        self.text_label.setStyleSheet("color: white; font-size: 16px; margin-top: 12px; font-weight: bold; background: transparent;")
+        self.text_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.spinner_label)
+        layout.addWidget(self.text_label)
         self.setFixedSize(300, 200)
     
     def set_message(self, message):

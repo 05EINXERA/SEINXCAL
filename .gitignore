@@ -8,3 +8,4 @@ tenv/
 __pycache__/
 saved_names.txt
 *test*.py
+*debug*.py
