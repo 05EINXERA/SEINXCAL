@@ -654,20 +654,79 @@ class AddEventDialog(QDialog):
         self.all_day_check.stateChanged.connect(self.on_all_day_changed)
         layout.addWidget(self.all_day_check)
         
-        # Start date/time
-        layout.addWidget(QLabel(tr('start_datetime')))
-        self.start_datetime = QDateTimeEdit()
-        self.start_datetime.setDateTime(QDateTime.currentDateTime())
-        self.start_datetime.setCalendarPopup(True)
-        self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
-        layout.addWidget(self.start_datetime)
+        # Start date/time section
+        start_container = QWidget()
+        start_layout = QVBoxLayout(start_container)
+        start_layout.setContentsMargins(0, 0, 0, 0)
         
-        # End date/time
-        layout.addWidget(QLabel(tr('end_datetime')))
-        self.end_datetime = QDateTimeEdit()
-        self.end_datetime.setDateTime(QDateTime.currentDateTime().addSecs(3600))
-        self.end_datetime.setCalendarPopup(True)
-        layout.addWidget(self.end_datetime)
+        # Start date label
+        start_date_label = QLabel(tr('start_datetime'))
+        start_layout.addWidget(start_date_label)
+        
+        # Start date and time row
+        start_datetime_row = QWidget()
+        start_datetime_layout = QHBoxLayout(start_datetime_row)
+        start_datetime_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Start date with weekday
+        self.start_date = QDateEdit()
+        self.start_date.setDate(QDate.currentDate())
+        self.start_date.setCalendarPopup(True)
+        self.start_date.setDisplayFormat("yyyy-MM-dd (ddd)")
+        self.start_weekday_label = QLabel()
+        self.start_weekday_label.setMinimumWidth(40)
+        self.start_weekday_label.setAlignment(Qt.AlignCenter)
+        self.update_start_weekday()
+        self.start_date.dateChanged.connect(self.update_start_weekday)
+        
+        # Start time
+        self.start_time = QTimeEdit()
+        self.start_time.setTime(QTime.currentTime())
+        self.start_time.setDisplayFormat("HH:mm")
+        
+        start_datetime_layout.addWidget(self.start_date)
+        start_datetime_layout.addWidget(self.start_weekday_label)
+        start_datetime_layout.addWidget(QLabel(tr('time')))
+        start_datetime_layout.addWidget(self.start_time)
+        start_layout.addWidget(start_datetime_row)
+        layout.addWidget(start_container)
+        
+        # End date/time section
+        end_container = QWidget()
+        end_layout = QVBoxLayout(end_container)
+        end_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # End date label
+        end_date_label = QLabel(tr('end_datetime'))
+        end_layout.addWidget(end_date_label)
+        
+        # End date and time row
+        end_datetime_row = QWidget()
+        end_datetime_layout = QHBoxLayout(end_datetime_row)
+        end_datetime_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # End date with weekday
+        self.end_date = QDateEdit()
+        self.end_date.setDate(QDate.currentDate())
+        self.end_date.setCalendarPopup(True)
+        self.end_date.setDisplayFormat("yyyy-MM-dd (ddd)")
+        self.end_weekday_label = QLabel()
+        self.end_weekday_label.setMinimumWidth(40)
+        self.end_weekday_label.setAlignment(Qt.AlignCenter)
+        self.update_end_weekday()
+        self.end_date.dateChanged.connect(self.update_end_weekday)
+        
+        # End time
+        self.end_time = QTimeEdit()
+        self.end_time.setTime(QTime.currentTime().addSecs(3600))
+        self.end_time.setDisplayFormat("HH:mm")
+        
+        end_datetime_layout.addWidget(self.end_date)
+        end_datetime_layout.addWidget(self.end_weekday_label)
+        end_datetime_layout.addWidget(QLabel(tr('time')))
+        end_datetime_layout.addWidget(self.end_time)
+        end_layout.addWidget(end_datetime_row)
+        layout.addWidget(end_container)
         
         # Remarks with speech input
         remarks_container = QWidget()
@@ -690,9 +749,11 @@ class AddEventDialog(QDialog):
         
         self.setLayout(layout)
         self.setTabOrder(self.name_edit, self.location_edit)
-        self.setTabOrder(self.location_edit, self.start_datetime)
-        self.setTabOrder(self.start_datetime, self.end_datetime)
-        self.setTabOrder(self.end_datetime, self.remarks_edit)
+        self.setTabOrder(self.location_edit, self.start_date)
+        self.setTabOrder(self.start_date, self.start_time)
+        self.setTabOrder(self.start_time, self.end_date)
+        self.setTabOrder(self.end_date, self.end_time)
+        self.setTabOrder(self.end_time, self.remarks_edit)
         self.setTabOrder(self.remarks_edit, self.all_day_check)
         self.setTabOrder(self.all_day_check, self.name_speech)
         self.setTabOrder(self.name_speech, self.location_speech)
@@ -700,8 +761,10 @@ class AddEventDialog(QDialog):
         self.setTabOrder(self.remarks_speech, self.findChild(QDialogButtonBox))
         self.name_edit.setAccessibleName("Event Name")
         self.location_edit.setAccessibleName("Location")
-        self.start_datetime.setAccessibleName("Start DateTime")
-        self.end_datetime.setAccessibleName("End DateTime")
+        self.start_date.setAccessibleName("Start Date")
+        self.start_time.setAccessibleName("Start Time")
+        self.end_date.setAccessibleName("End Date")
+        self.end_time.setAccessibleName("End Time")
         self.remarks_edit.setAccessibleName("Remarks")
         self.all_day_check.setAccessibleName("All Day Event Checkbox")
     
@@ -755,6 +818,10 @@ class AddEventDialog(QDialog):
         # Update microphone button styling too
         self.name_speech.update_theme()
         self.location_speech.update_theme()
+        
+        # Update weekday label styling
+        self.update_start_weekday()
+        self.update_end_weekday()
     
     def load_saved_names(self):
         """Load saved names into the completer for suggestions."""
@@ -795,45 +862,103 @@ class AddEventDialog(QDialog):
             model = QStringListModel(recent_names)
             self.name_completer.setModel(model)
     
-    def setup_datetime_section(self, date_edit, label, show_time=True):
-        # Create a horizontal layout for the date/time section
-        section_layout = QHBoxLayout()
-        section_layout.addWidget(QLabel(label))
+    def update_start_weekday(self):
+        """Update the start weekday label based on selected date."""
+        date = self.start_date.date()
+        weekday = date.dayOfWeek()
+        # Qt returns 1-7 for Monday-Sunday, map to our translation keys
+        weekday_map = {1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat', 7: 'sun'}
+        weekday_key = weekday_map.get(weekday, 'mon')
+        self.start_weekday_label.setText(tr(weekday_key))
         
-        # Add date edit
-        self.date_part = QDateEdit(date_edit)
-        self.date_part.setCalendarPopup(True)
-        section_layout.addWidget(self.date_part)
+        # Update styling based on theme
+        if AppSettings.theme == 'dark':
+            self.start_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #4a9eff;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #2c313a;
+                }
+            """)
+        else:
+            self.start_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #1976d2;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #f5f5f5;
+                }
+            """)
+    
+    def update_end_weekday(self):
+        """Update the end weekday label based on selected date."""
+        date = self.end_date.date()
+        weekday = date.dayOfWeek()
+        # Qt returns 1-7 for Monday-Sunday, map to our translation keys
+        weekday_map = {1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat', 7: 'sun'}
+        weekday_key = weekday_map.get(weekday, 'mon')
+        self.end_weekday_label.setText(tr(weekday_key))
         
-        # Add time edit
-        if show_time:
-            self.time_part = QTimeEdit(date_edit)
-            section_layout.addWidget(self.time_part)
-        
-        return section_layout
+        # Update styling based on theme
+        if AppSettings.theme == 'dark':
+            self.end_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #4a9eff;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #2c313a;
+                }
+            """)
+        else:
+            self.end_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #1976d2;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #f5f5f5;
+                }
+            """)
 
     def on_all_day_changed(self, state):
-        # Store current times before changing format
-        start_time = self.start_datetime.time()
-        end_time = self.end_datetime.time()
-        
-        # Change display format based on all-day status
-        self.start_datetime.setDisplayFormat("yyyy-MM-dd" if state else "yyyy-MM-dd HH:mm")
-        self.end_datetime.setDisplayFormat("yyyy-MM-dd" if state else "yyyy-MM-dd HH:mm")
-        
+        """Handle all-day event checkbox state change."""
         if state:
             # For all-day events, set times to start and end of day
-            self.start_datetime.setTime(QTime(0, 0))
-            self.end_datetime.setTime(QTime(23, 59))
+            self.start_time.setTime(QTime(0, 0))
+            self.end_time.setTime(QTime(23, 59))
+            # Hide time inputs for all-day events
+            self.start_time.setVisible(False)
+            self.end_time.setVisible(False)
+            # Hide time labels
+            for widget in self.findChildren(QLabel):
+                if widget.text() == tr('time'):
+                    widget.setVisible(False)
         else:
-            # Restore previous times when switching back to non-all-day
-            self.start_datetime.setTime(start_time)
-            self.end_datetime.setTime(end_time)
+            # Show time inputs for non-all-day events
+            self.start_time.setVisible(True)
+            self.end_time.setVisible(True)
+            # Show time labels
+            for widget in self.findChildren(QLabel):
+                if widget.text() == tr('time'):
+                    widget.setVisible(True)
     
     def get_event_data(self):
         is_all_day = self.all_day_check.isChecked()
-        start_dt = self.start_datetime.dateTime().toPyDateTime()
-        end_dt = self.end_datetime.dateTime().toPyDateTime()
+        
+        # Combine date and time for start datetime
+        start_date = self.start_date.date()
+        start_time = self.start_time.time()
+        start_dt = QDateTime(start_date, start_time).toPyDateTime()
+        
+        # Combine date and time for end datetime
+        end_date = self.end_date.date()
+        end_time = self.end_time.time()
+        end_dt = QDateTime(end_date, end_time).toPyDateTime()
+        
         # Sanitize user input: strip, limit length, remove dangerous chars
         def sanitize(text, maxlen=256):
             return ''.join(c for c in text.strip() if c.isprintable())[:maxlen]
@@ -1075,13 +1200,6 @@ class UpdateEventDialog(AddEventDialog):
         is_all_day = 'date' in event_data['start']
         self.all_day_check.setChecked(is_all_day)
         
-        # Update the datetime display format based on all-day status
-        if is_all_day:
-            self.start_datetime.setDisplayFormat("yyyy-MM-dd")
-            self.end_datetime.setDisplayFormat("yyyy-MM-dd")
-        else:
-            self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
-        
         # Parse start and end times
         start = event_data['start'].get('dateTime', event_data['start'].get('date'))
         end = event_data['end'].get('dateTime', event_data['end'].get('date'))
@@ -1101,16 +1219,24 @@ class UpdateEventDialog(AddEventDialog):
             # Date only - use end of day
             end_dt = datetime.fromisoformat(end)
         
-        # Convert to local time and set in the dialog
-        self.start_datetime.setDateTime(QDateTime(
-            QDate(start_dt.year, start_dt.month, start_dt.day),
-            QTime(start_dt.hour, start_dt.minute)
-        ))
+        # Set the date and time separately
+        self.start_date.setDate(QDate(start_dt.year, start_dt.month, start_dt.day))
+        self.start_time.setTime(QTime(start_dt.hour, start_dt.minute))
+        self.end_date.setDate(QDate(end_dt.year, end_dt.month, end_dt.day))
+        self.end_time.setTime(QTime(end_dt.hour, end_dt.minute))
         
-        self.end_datetime.setDateTime(QDateTime(
-            QDate(end_dt.year, end_dt.month, end_dt.day),
-            QTime(end_dt.hour, end_dt.minute)
-        ))
+        # Update weekday labels
+        self.update_start_weekday()
+        self.update_end_weekday()
+        
+        # Handle all-day event visibility
+        if is_all_day:
+            self.start_time.setVisible(False)
+            self.end_time.setVisible(False)
+            # Hide time labels
+            for widget in self.findChildren(QLabel):
+                if widget.text() == tr('time'):
+                    widget.setVisible(False)
     
     def get_event_data(self):
         """Override to ensure name persistence works for updates too."""
@@ -1664,60 +1790,83 @@ class MainWindow(QMainWindow):
         
         return events_result.get('items', [])
     
+    def format_date_with_weekday(self, dt, include_time=True, is_all_day=False):
+        """Format a datetime object to include weekday."""
+        # Get weekday name
+        weekday_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        weekday = dt.weekday()  # 0=Monday, 6=Sunday
+        weekday_key = weekday_map.get(weekday, 'mon')
+        weekday_name = tr(weekday_key)
+        
+        if is_all_day:
+            return f"{dt.strftime('%Y-%m-%d')} ({weekday_name}) ({tr('all_day')})"
+        elif include_time:
+            return f"{dt.strftime('%Y-%m-%d %H:%M')} ({weekday_name})"
+        else:
+            return f"{dt.strftime('%Y-%m-%d')} ({weekday_name})"
+    
     def populate_table(self, table, events, upcoming_events=None):
-        # Clear the table completely
+        """Populate table with events, ensuring proper row structure."""
+        # Clear the table completely and reset structure
         table.clearContents()
+        table.clearSpans()  # Clear any merged cells
         table.event_data = {}  # Clear existing event data
+        
+        # Reset table structure completely
+        table.setRowCount(0)
         
         # Only show rows if logged in
         if not self.service:
-            table.setRowCount(0)
             return
-        
-        # Calculate total rows needed
-        total_rows = len(events)
-        if upcoming_events:
-            # Add 1 for separator and the length of upcoming events
-            total_rows += len(upcoming_events) + 1
-        # Set new row count (no extra rows)
-        table.setRowCount(total_rows)
         
         # Filter out any deleted events
         active_events = [event for event in events if not event.get('status') == 'cancelled']
+        upcoming_active = [event for event in upcoming_events if not event.get('status') == 'cancelled'] if upcoming_events else []
         
-        for i, event in enumerate(active_events):
+        # Calculate total rows needed
+        total_rows = len(active_events)
+        if upcoming_events:
+            # Add 2 for separator (empty row + separator row) and the length of upcoming events
+            total_rows += len(upcoming_active) + 2
+        
+        # Set new row count
+        table.setRowCount(total_rows)
+        
+        current_row = 0
+        
+        # Add main events
+        for event in active_events:
             start = event['start'].get('dateTime', event['start'].get('date'))
             end = event['end'].get('dateTime', event['end'].get('date'))
             
             # Parse datetime strings
             if 'T' in start:
                 start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                start_str = start_dt.strftime("%Y-%m-%d %H:%M")
+                start_str = self.format_date_with_weekday(start_dt, include_time=True, is_all_day=False)
             else:
                 start_dt = datetime.fromisoformat(start)
-                start_str = f"{start_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                start_str = self.format_date_with_weekday(start_dt, include_time=False, is_all_day=True)
             
             if 'T' in end:
                 end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+                end_str = self.format_date_with_weekday(end_dt, include_time=True, is_all_day=False)
             else:
                 end_dt = datetime.fromisoformat(end)
-                end_str = f"{end_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                end_str = self.format_date_with_weekday(end_dt, include_time=False, is_all_day=True)
             
             # Create new items for each cell
-            table.setItem(i, 0, QTableWidgetItem(event.get('summary', 'No Title')))
-            table.setItem(i, 1, QTableWidgetItem(event.get('location', '')))
-            table.setItem(i, 2, QTableWidgetItem(start_str))
-            table.setItem(i, 3, QTableWidgetItem(end_str))
-            table.setItem(i, 4, QTableWidgetItem(event.get('description', '')))
+            table.setItem(current_row, 0, QTableWidgetItem(event.get('summary', 'No Title')))
+            table.setItem(current_row, 1, QTableWidgetItem(event.get('location', '')))
+            table.setItem(current_row, 2, QTableWidgetItem(start_str))
+            table.setItem(current_row, 3, QTableWidgetItem(end_str))
+            table.setItem(current_row, 4, QTableWidgetItem(event.get('description', '')))
             
             # Store event data for this row
-            table.event_data[i] = event
-            
-        current_row = len(active_events)
+            table.event_data[current_row] = event
+            current_row += 1
         
         # If we have upcoming events, add them after a separator
-        if upcoming_events:
+        if upcoming_events and upcoming_active:
             # Add empty row before separator
             for col in range(5):
                 empty_item = QTableWidgetItem("")
@@ -1725,44 +1874,39 @@ class MainWindow(QMainWindow):
             current_row += 1
             
             # Add separator row
-            # Use translated label and theme-aware styling for separator row
             separator_item = QTableWidgetItem(tr('upcoming_events'))
             if AppSettings.theme == 'dark':
                 separator_item.setBackground(QColor("#333333"))
                 separator_item.setForeground(QColor("#ffffff"))
-                # Add a bottom border for the breaker
-                separator_item.setData(Qt.UserRole, 'breaker')
             else:
                 separator_item.setBackground(QColor("#f0f0f0"))
                 separator_item.setForeground(QColor("#222222"))
-                separator_item.setData(Qt.UserRole, 'breaker')
+            separator_item.setData(Qt.UserRole, 'breaker')
             separator_item.setFont(QFont("Arial", 10, QFont.Bold))
-            separator_item.setTextAlignment(Qt.AlignCenter)  # Center the text
+            separator_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(current_row, 0, separator_item)
             table.setSpan(current_row, 0, 1, 5)  # Merge all columns for the separator row
-            separator_item.setFlags(separator_item.flags() & ~Qt.ItemIsEditable)  # Make it non-editable
-            
+            separator_item.setFlags(separator_item.flags() & ~Qt.ItemIsEditable)
             current_row += 1
             
             # Add upcoming events
-            upcoming_active = [event for event in upcoming_events if not event.get('status') == 'cancelled']
             for event in upcoming_active:
                 start = event['start'].get('dateTime', event['start'].get('date'))
                 end = event['end'].get('dateTime', event['end'].get('date'))
                 
                 if 'T' in start:
                     start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                    start_str = start_dt.strftime("%Y-%m-%d %H:%M")
+                    start_str = self.format_date_with_weekday(start_dt, include_time=True, is_all_day=False)
                 else:
                     start_dt = datetime.fromisoformat(start)
-                    start_str = f"{start_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                    start_str = self.format_date_with_weekday(start_dt, include_time=False, is_all_day=True)
                 
                 if 'T' in end:
                     end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                    end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+                    end_str = self.format_date_with_weekday(end_dt, include_time=True, is_all_day=False)
                 else:
                     end_dt = datetime.fromisoformat(end)
-                    end_str = f"{end_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                    end_str = self.format_date_with_weekday(end_dt, include_time=False, is_all_day=True)
                 
                 table.setItem(current_row, 0, QTableWidgetItem(event.get('summary', 'No Title')))
                 table.setItem(current_row, 1, QTableWidgetItem(event.get('location', '')))
@@ -1773,10 +1917,7 @@ class MainWindow(QMainWindow):
                 table.event_data[current_row] = event
                 current_row += 1
         
-        # Refresh the table
-        table.viewport().update()
-
-        # Fill with empty rows to the end of the viewport
+        # Add empty rows for better UX
         visible_rows = table.viewport().height() // table.rowHeight(0) if table.rowCount() > 0 else 10
         extra_rows = max(0, visible_rows - table.rowCount())
         for _ in range(extra_rows):
@@ -1784,6 +1925,9 @@ class MainWindow(QMainWindow):
             table.insertRow(row)
             for col in range(table.columnCount()):
                 table.setItem(row, col, QTableWidgetItem(""))
+        
+        # Refresh the table
+        table.viewport().update()
     
     def reset_to_today(self):
         self.current_date = datetime.now().date()
@@ -1850,8 +1994,8 @@ class MainWindow(QMainWindow):
                 ).execute()
                 self.show_snackbar(tr('event_update_success'))
                 
-                # Force a refresh from the server
-                QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
+                # Force an immediate refresh from the server
+                self.load_events()
                 
             except Exception as e:
                 QMessageBox.warning(self, tr('error'), f"{tr('event_update_failed')} {str(e)}")
@@ -1873,8 +2017,8 @@ class MainWindow(QMainWindow):
                 ).execute()
                 self.show_snackbar(tr('event_deleted'))
                 
-                # Force a refresh from the server
-                QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
+                # Force an immediate refresh from the server
+                self.load_events()
                 
             except Exception as e:
                 QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
@@ -1897,6 +2041,11 @@ class MainWindow(QMainWindow):
             # Apply theme
             self.change_theme(settings['theme'].lower())
 
+    def force_table_refresh(self):
+        """Force a complete refresh of all tables."""
+        if self.service:
+            self.load_events()
+    
     def show_snackbar(self, message, duration=3000):
         """Show a temporary notification at the bottom of the window."""
         self.snackbar.show_snackbar(message, duration)
@@ -1961,6 +2110,17 @@ TRANSLATIONS = {
         'cog_tooltip': 'Settings',
         'upcoming_events': 'Upcoming Events',
         'all_day': 'All day',
+        'time': 'Time',
+        'date': 'Date',
+        'start_time': 'Start Time',
+        'end_time': 'End Time',
+        'sun': 'Sun',
+        'mon': 'Mon',
+        'tue': 'Tue',
+        'wed': 'Wed',
+        'thu': 'Thu',
+        'fri': 'Fri',
+        'sat': 'Sat',
     },
     'ja': {
         'language': '言語',
@@ -2020,6 +2180,17 @@ TRANSLATIONS = {
         'cog_tooltip': '設定',
         'upcoming_events': '予定イベント',
         'all_day': '終日',
+        'time': '時間',
+        'date': '日付',
+        'start_time': '開始時間',
+        'end_time': '終了時間',
+        'sun': '日',
+        'mon': '月',
+        'tue': '火',
+        'wed': '水',
+        'thu': '木',
+        'fri': '金',
+        'sat': '土',
     }
 }
 
