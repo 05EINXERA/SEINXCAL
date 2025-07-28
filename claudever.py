@@ -22,6 +22,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QDate, QDateTime, QTim
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTimeEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDateTimeEdit, QTextEdit, QMessageBox, QCheckBox, QDialogButtonBox, QAbstractItemView, QSizePolicy, QHeaderView, QButtonGroup, QMenu, QDesktopWidget, QComboBox, QShortcut, QDateEdit, QCompleter)
 from PyQt5.QtGui import QFont, QIcon, QColor, QCursor, QKeySequence, QPainter
 from PyQt5.QtCore import QStringListModel
+from PyQt5.QtGui import QMovie
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -1529,54 +1530,38 @@ class SettingsDialog(QDialog):
 # -----------------------------
 # MainWindow: Main application window
 # -----------------------------
-class Snackbar(QLabel):
-    """
-    A simple snackbar widget for temporary user notifications.
-    Appears at the bottom center of the parent window and fades in/out.
-    """
-    def __init__(self, parent=None):
+class SpinnerDialog(QDialog):
+    def __init__(self, parent=None, message="Loading..."):
         super().__init__(parent)
-        self.setStyleSheet(
-            "background-color: rgba(50, 50, 50, 0.95); color: white; "
-            "border-radius: 8px; padding: 12px 32px; font-size: 15px;"
-        )
-        self.setAlignment(Qt.AlignCenter)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setModal(True)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setVisible(False)
-        self.anim = QPropertyAnimation(self, b"windowOpacity")
-        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
-        self.anim.finished.connect(self._on_fade_out)
-        self._is_showing = False
-    def show_snackbar(self, message, duration=3000):
-        if self._is_showing:
-            self.hide()
-        self.setText(message)
-        self.adjustSize()
-        parent = self.parentWidget()
+        self.setStyleSheet("background-color: rgba(0, 0, 0, 128);")
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        self.spinner_label = QLabel(self)
+        self.spinner_label.setAlignment(Qt.AlignCenter)
+        self.spinner_movie = None
+        try:
+            if os.path.exists("icons/spinner.gif"):
+                self.spinner_movie = QMovie("icons/spinner.gif")
+                self.spinner_label.setMovie(self.spinner_movie)
+                self.spinner_movie.start()
+            else:
+                self.spinner_label.setText("Loading...")
+        except Exception:
+            self.spinner_label.setText("Loading...")
+        self.text_label = QLabel(message, self)
+        self.text_label.setStyleSheet("color: white; font-size: 18px; margin-top: 16px;")
+        self.text_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.spinner_label)
+        layout.addWidget(self.text_label)
         if parent:
-            x = (parent.width() - self.width()) // 2
-            y = parent.height() - self.height() - 40
-            self.move(x, y)
-        self.setWindowOpacity(0.0)
-        self.setVisible(True)
-        self.anim.stop()
-        self.anim.setDuration(250)
-        self.anim.setStartValue(0.0)
-        self.anim.setEndValue(1.0)
-        self.anim.start()
-        QTimer.singleShot(duration, self.fade_out)
-        self._is_showing = True
-    def fade_out(self):
-        self.anim.stop()
-        self.anim.setDuration(400)
-        self.anim.setStartValue(1.0)
-        self.anim.setEndValue(0.0)
-        self.anim.start()
-    def _on_fade_out(self):
-        if self.windowOpacity() == 0.0:
-            self.setVisible(False)
-            self._is_showing = False
+            self.setFixedSize(parent.size())
+        else:
+            self.setFixedSize(400, 300)
+    def set_message(self, message):
+        self.text_label.setText(message)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1794,42 +1779,36 @@ class MainWindow(QMainWindow):
         menu.exec_(button_pos)
     
     def auto_show_login(self):
-        """Automatically show login dialog on startup if not already logged in."""
-        if not self.service:  # Only show if not already logged in
-            # Check if we can auto-login without showing the dialog
+        if not self.service:
             settings = QSettings("SEINX", "Calendar")
             last_calendar_id = settings.value("last_calendar_id", "")
-            
             if last_calendar_id:
-                # Try to auto-login silently using token manager
-                try:
-                    creds = token_manager.get_valid_credentials()
-                    if creds:
-                        # Test the connection
-                        service = build('calendar', 'v3', credentials=creds)
-                        calendar = service.calendars().get(calendarId=last_calendar_id).execute()
-                        
-                        # Auto-login successful
-                        self.calendar_id = last_calendar_id
-                        self.user_email = calendar.get('id', 'Unknown')
-                        self.service = service
-                        
-                        # Update UI
-                        calendar_name = calendar.get('summary', self.calendar_id)
-                        self.user_label.setText(calendar_name)
-                        self.load_events()
-                        self.refresh_timer.start()
-                        
-                        # Show success message
-                        self.show_snackbar("Auto-login successful!", 2000)
-                        return
-                        
-                except Exception as e:
-                    logger.info(f"Silent auto-login failed: {e}")
-                    # Fall through to show login dialog
-            
-            # Show login dialog
-            self.show_login()
+                spinner = SpinnerDialog(self, "Logging in with saved credentials...")
+                def do_login():
+                    try:
+                        creds = token_manager.get_valid_credentials()
+                        if creds:
+                            service = build('calendar', 'v3', credentials=creds)
+                            calendar = service.calendars().get(calendarId=last_calendar_id).execute()
+                            self.calendar_id = last_calendar_id
+                            self.user_email = calendar.get('id', 'Unknown')
+                            self.service = service
+                            calendar_name = calendar.get('summary', self.calendar_id)
+                            self.user_label.setText(calendar_name)
+                            self.load_events()
+                            self.refresh_timer.start()
+                            self.show_snackbar("Auto-login successful!", 2000)
+                            spinner.accept()
+                            return
+                        spinner.accept()
+                    except Exception as e:
+                        logger.info(f"Silent auto-login failed: {e}")
+                        spinner.accept()
+                    self.show_login()
+                QTimer.singleShot(200, do_login)
+                spinner.exec_()
+            else:
+                self.show_login()
     
     def show_login(self):
         login_dialog = LoginDialog(self)
@@ -2571,6 +2550,57 @@ def tr(key, lang=None):
     if lang is None:
         lang = AppSettings.language
     return TRANSLATIONS.get(lang, TRANSLATIONS['en']).get(key, key)
+
+class Snackbar(QLabel):
+    """
+    A simple snackbar widget for temporary user notifications.
+    Appears at the bottom center of the parent window and fades in/out.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "background-color: rgba(50, 50, 50, 0.95); color: white; "
+            "border-radius: 8px; padding: 12px 32px; font-size: 15px;"
+        )
+        self.setAlignment(Qt.AlignCenter)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self.setVisible(False)
+        self.anim = QPropertyAnimation(self, b"windowOpacity")
+        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self.anim.finished.connect(self._on_fade_out)
+        self._is_showing = False
+
+    def show_snackbar(self, message, duration=3000):
+        if self._is_showing:
+            self.hide()
+        self.setText(message)
+        self.adjustSize()
+        parent = self.parentWidget()
+        if parent:
+            x = (parent.width() - self.width()) // 2
+            y = parent.height() - self.height() - 40
+            self.move(x, y)
+        self.setWindowOpacity(0.0)
+        self.setVisible(True)
+        self.anim.stop()
+        self.anim.setDuration(250)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.start()
+        QTimer.singleShot(duration, self.fade_out)
+        self._is_showing = True
+
+    def fade_out(self):
+        self.anim.stop()
+        self.anim.setDuration(400)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.start()
+
+    def _on_fade_out(self):
+        if self.windowOpacity() == 0.0:
+            self.setVisible(False)
+            self._is_showing = False
 
 if __name__ == "__main__":
     # --- Startup environment checks ---
