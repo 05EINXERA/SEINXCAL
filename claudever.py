@@ -1338,6 +1338,7 @@ class MainWindow(QMainWindow):
         self.current_date = datetime.now().date()
         self.theme = "light"
         self.language = "en"
+        self.is_date_specific_view = False  # Track if we're showing a specific date
         
         # Set minimum size and get screen geometry
         self.setMinimumSize(1000, 600)
@@ -1354,7 +1355,7 @@ class MainWindow(QMainWindow):
         
         # Setup auto-refresh timer
         self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self.load_events)
+        self.refresh_timer.timeout.connect(self.force_table_refresh)
         self.refresh_timer.setInterval(30000)  # 30 seconds
         
         self.setup_ui()
@@ -1707,7 +1708,8 @@ class MainWindow(QMainWindow):
             selected_date = dialog.get_date()
             self.current_date = selected_date
             self.date_label.setText(selected_date.strftime("%Y-%m-%d"))
-            self.load_events()
+            self.is_date_specific_view = True  # Set flag for date-specific view
+            self.load_events_for_specific_date(selected_date)
             # Show Today button if not today
             if self.current_date != datetime.now().date():
                 self.today_btn.setVisible(True)
@@ -1746,10 +1748,36 @@ class MainWindow(QMainWindow):
             
             event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
             self.show_snackbar(tr('event_created'))
-            self.load_events()
+            self.force_table_refresh()
             
         except Exception as e:
             QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
+    
+    def load_events_for_specific_date(self, target_date):
+        """Load events only for the specific date, without past or upcoming events."""
+        if not self.service:
+            return
+        
+        try:
+            # Get events for the specific date only
+            date_start = datetime.combine(target_date, datetime.min.time())
+            date_end = datetime.combine(target_date, datetime.max.time())
+            
+            date_events = self.get_events(date_start, date_end)
+            
+            # Populate today's table with only the date-specific events
+            date_str = target_date.strftime("%Y-%m-%d")
+            custom_title = tr('events_for_date').format(date=date_str)
+            self.populate_table(self.today_table, date_events, custom_title=custom_title)
+            
+            # Clear past table since we're showing specific date only
+            self.past_table.clearContents()
+            self.past_table.clearSpans()
+            self.past_table.setRowCount(0)
+            self.past_table.event_data = {}
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load events for date: {str(e)}")
     
     def load_events(self):
         if not self.service:
@@ -1805,7 +1833,7 @@ class MainWindow(QMainWindow):
         else:
             return f"{dt.strftime('%Y-%m-%d')} ({weekday_name})"
     
-    def populate_table(self, table, events, upcoming_events=None):
+    def populate_table(self, table, events, upcoming_events=None, custom_title=None):
         """Populate table with events, ensuring proper row structure."""
         # Clear the table completely and reset structure
         table.clearContents()
@@ -1825,6 +1853,8 @@ class MainWindow(QMainWindow):
         
         # Calculate total rows needed
         total_rows = len(active_events)
+        if custom_title:
+            total_rows += 1  # Add 1 for custom title separator
         if upcoming_events:
             # Add 2 for separator (empty row + separator row) and the length of upcoming events
             total_rows += len(upcoming_active) + 2
@@ -1833,6 +1863,24 @@ class MainWindow(QMainWindow):
         table.setRowCount(total_rows)
         
         current_row = 0
+        
+        # Add custom title separator if provided
+        if custom_title:
+            # Add separator row with custom title
+            separator_item = QTableWidgetItem(custom_title)
+            if AppSettings.theme == 'dark':
+                separator_item.setBackground(QColor("#2c313a"))
+                separator_item.setForeground(QColor("#4a9eff"))
+            else:
+                separator_item.setBackground(QColor("#f8f9fa"))
+                separator_item.setForeground(QColor("#1976d2"))
+            separator_item.setData(Qt.UserRole, 'date_separator')
+            separator_item.setFont(QFont("Arial", 10, QFont.Bold))
+            separator_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(current_row, 0, separator_item)
+            table.setSpan(current_row, 0, 1, 5)  # Merge all columns for the separator row
+            separator_item.setFlags(separator_item.flags() & ~Qt.ItemIsEditable)
+            current_row += 1
         
         # Add main events
         for event in active_events:
@@ -1867,11 +1915,12 @@ class MainWindow(QMainWindow):
         
         # If we have upcoming events, add them after a separator
         if upcoming_events and upcoming_active:
-            # Add empty row before separator
-            for col in range(5):
-                empty_item = QTableWidgetItem("")
-                table.setItem(current_row, col, empty_item)
-            current_row += 1
+            # Add empty row before separator (only if we don't have a custom title)
+            if not custom_title:
+                for col in range(5):
+                    empty_item = QTableWidgetItem("")
+                    table.setItem(current_row, col, empty_item)
+                current_row += 1
             
             # Add separator row
             separator_item = QTableWidgetItem(tr('upcoming_events'))
@@ -1932,6 +1981,7 @@ class MainWindow(QMainWindow):
     def reset_to_today(self):
         self.current_date = datetime.now().date()
         self.date_label.setText(self.current_date.strftime("%Y-%m-%d"))
+        self.is_date_specific_view = False  # Clear flag for regular view
         self.load_events()
         self.today_btn.setVisible(False)
     
@@ -1946,7 +1996,7 @@ class MainWindow(QMainWindow):
         self.calendar_id = None
         self.user_label.setText("No connected account")
         self.clear_tables()
-        self.load_events()  # This will respect the logged-out state
+        # No need to refresh when logged out
     
     def clear_tables(self):
         # Clear and hide rows in all tables when logged out
@@ -1995,7 +2045,7 @@ class MainWindow(QMainWindow):
                 self.show_snackbar(tr('event_update_success'))
                 
                 # Force an immediate refresh from the server
-                self.load_events()
+                self.force_table_refresh()
                 
             except Exception as e:
                 QMessageBox.warning(self, tr('error'), f"{tr('event_update_failed')} {str(e)}")
@@ -2018,7 +2068,7 @@ class MainWindow(QMainWindow):
                 self.show_snackbar(tr('event_deleted'))
                 
                 # Force an immediate refresh from the server
-                self.load_events()
+                self.force_table_refresh()
                 
             except Exception as e:
                 QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
@@ -2044,7 +2094,12 @@ class MainWindow(QMainWindow):
     def force_table_refresh(self):
         """Force a complete refresh of all tables."""
         if self.service:
-            self.load_events()
+            if self.is_date_specific_view:
+                # Refresh with date-specific view
+                self.load_events_for_specific_date(self.current_date)
+            else:
+                # Refresh with regular view
+                self.load_events()
     
     def show_snackbar(self, message, duration=3000):
         """Show a temporary notification at the bottom of the window."""
@@ -2121,6 +2176,7 @@ TRANSLATIONS = {
         'thu': 'Thu',
         'fri': 'Fri',
         'sat': 'Sat',
+        'events_for_date': 'Events for {date}',
     },
     'ja': {
         'language': '言語',
@@ -2191,6 +2247,7 @@ TRANSLATIONS = {
         'thu': '木',
         'fri': '金',
         'sat': '土',
+        'events_for_date': '{date}のイベント',
     }
 }
 
