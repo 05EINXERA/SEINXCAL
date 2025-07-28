@@ -1536,30 +1536,29 @@ class SpinnerDialog(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setModal(True)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 128);")
+        self.setStyleSheet("""
+            QDialog {
+                background-color: transparent;
+            }
+        """)
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.spinner_label = QLabel(self)
         self.spinner_label.setAlignment(Qt.AlignCenter)
-        self.spinner_movie = None
-        try:
-            if os.path.exists("icons/spinner.gif"):
-                self.spinner_movie = QMovie("icons/spinner.gif")
-                self.spinner_label.setMovie(self.spinner_movie)
-                self.spinner_movie.start()
-            else:
-                self.spinner_label.setText("Loading...")
-        except Exception:
-            self.spinner_label.setText("Loading...")
-        self.text_label = QLabel(message, self)
-        self.text_label.setStyleSheet("color: white; font-size: 18px; margin-top: 16px;")
-        self.text_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.spinner_label)
-        layout.addWidget(self.text_label)
-        if parent:
-            self.setFixedSize(parent.size())
+        self.spinner_label.setStyleSheet("background: transparent;")
+        gif_path = os.path.join('icons', 'spinner.gif')
+        if os.path.exists(gif_path):
+            self.spinner_movie = QMovie(gif_path)
+            self.spinner_label.setMovie(self.spinner_movie)
+            self.spinner_movie.start()
         else:
-            self.setFixedSize(400, 300)
+            self.spinner_label.setText("⏳")
+            self.spinner_label.setStyleSheet("font-size: 48px; color: white;")
+        layout.addWidget(self.spinner_label)
+        self.setFixedSize(300, 200)
+    
     def set_message(self, message):
         self.text_label.setText(message)
 
@@ -1805,7 +1804,8 @@ class MainWindow(QMainWindow):
                         logger.info(f"Silent auto-login failed: {e}")
                         spinner.accept()
                     self.show_login()
-                QTimer.singleShot(200, do_login)
+                # Give the spinner time to render and animate before starting login
+                QTimer.singleShot(1000, do_login)
                 spinner.exec_()
             else:
                 self.show_login()
