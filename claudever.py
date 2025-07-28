@@ -1806,27 +1806,36 @@ class MainWindow(QMainWindow):
             return f"{dt.strftime('%Y-%m-%d')} ({weekday_name})"
     
     def populate_table(self, table, events, upcoming_events=None):
-        # Clear the table completely
+        """Populate table with events, ensuring proper row structure."""
+        # Clear the table completely and reset structure
         table.clearContents()
+        table.clearSpans()  # Clear any merged cells
         table.event_data = {}  # Clear existing event data
+        
+        # Reset table structure completely
+        table.setRowCount(0)
         
         # Only show rows if logged in
         if not self.service:
-            table.setRowCount(0)
             return
-        
-        # Calculate total rows needed
-        total_rows = len(events)
-        if upcoming_events:
-            # Add 1 for separator and the length of upcoming events
-            total_rows += len(upcoming_events) + 1
-        # Set new row count (no extra rows)
-        table.setRowCount(total_rows)
         
         # Filter out any deleted events
         active_events = [event for event in events if not event.get('status') == 'cancelled']
+        upcoming_active = [event for event in upcoming_events if not event.get('status') == 'cancelled'] if upcoming_events else []
         
-        for i, event in enumerate(active_events):
+        # Calculate total rows needed
+        total_rows = len(active_events)
+        if upcoming_events:
+            # Add 2 for separator (empty row + separator row) and the length of upcoming events
+            total_rows += len(upcoming_active) + 2
+        
+        # Set new row count
+        table.setRowCount(total_rows)
+        
+        current_row = 0
+        
+        # Add main events
+        for event in active_events:
             start = event['start'].get('dateTime', event['start'].get('date'))
             end = event['end'].get('dateTime', event['end'].get('date'))
             
@@ -1846,19 +1855,18 @@ class MainWindow(QMainWindow):
                 end_str = self.format_date_with_weekday(end_dt, include_time=False, is_all_day=True)
             
             # Create new items for each cell
-            table.setItem(i, 0, QTableWidgetItem(event.get('summary', 'No Title')))
-            table.setItem(i, 1, QTableWidgetItem(event.get('location', '')))
-            table.setItem(i, 2, QTableWidgetItem(start_str))
-            table.setItem(i, 3, QTableWidgetItem(end_str))
-            table.setItem(i, 4, QTableWidgetItem(event.get('description', '')))
+            table.setItem(current_row, 0, QTableWidgetItem(event.get('summary', 'No Title')))
+            table.setItem(current_row, 1, QTableWidgetItem(event.get('location', '')))
+            table.setItem(current_row, 2, QTableWidgetItem(start_str))
+            table.setItem(current_row, 3, QTableWidgetItem(end_str))
+            table.setItem(current_row, 4, QTableWidgetItem(event.get('description', '')))
             
             # Store event data for this row
-            table.event_data[i] = event
-            
-        current_row = len(active_events)
+            table.event_data[current_row] = event
+            current_row += 1
         
         # If we have upcoming events, add them after a separator
-        if upcoming_events:
+        if upcoming_events and upcoming_active:
             # Add empty row before separator
             for col in range(5):
                 empty_item = QTableWidgetItem("")
@@ -1866,27 +1874,22 @@ class MainWindow(QMainWindow):
             current_row += 1
             
             # Add separator row
-            # Use translated label and theme-aware styling for separator row
             separator_item = QTableWidgetItem(tr('upcoming_events'))
             if AppSettings.theme == 'dark':
                 separator_item.setBackground(QColor("#333333"))
                 separator_item.setForeground(QColor("#ffffff"))
-                # Add a bottom border for the breaker
-                separator_item.setData(Qt.UserRole, 'breaker')
             else:
                 separator_item.setBackground(QColor("#f0f0f0"))
                 separator_item.setForeground(QColor("#222222"))
-                separator_item.setData(Qt.UserRole, 'breaker')
+            separator_item.setData(Qt.UserRole, 'breaker')
             separator_item.setFont(QFont("Arial", 10, QFont.Bold))
-            separator_item.setTextAlignment(Qt.AlignCenter)  # Center the text
+            separator_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(current_row, 0, separator_item)
             table.setSpan(current_row, 0, 1, 5)  # Merge all columns for the separator row
-            separator_item.setFlags(separator_item.flags() & ~Qt.ItemIsEditable)  # Make it non-editable
-            
+            separator_item.setFlags(separator_item.flags() & ~Qt.ItemIsEditable)
             current_row += 1
             
             # Add upcoming events
-            upcoming_active = [event for event in upcoming_events if not event.get('status') == 'cancelled']
             for event in upcoming_active:
                 start = event['start'].get('dateTime', event['start'].get('date'))
                 end = event['end'].get('dateTime', event['end'].get('date'))
@@ -1914,10 +1917,7 @@ class MainWindow(QMainWindow):
                 table.event_data[current_row] = event
                 current_row += 1
         
-        # Refresh the table
-        table.viewport().update()
-
-        # Fill with empty rows to the end of the viewport
+        # Add empty rows for better UX
         visible_rows = table.viewport().height() // table.rowHeight(0) if table.rowCount() > 0 else 10
         extra_rows = max(0, visible_rows - table.rowCount())
         for _ in range(extra_rows):
@@ -1925,6 +1925,9 @@ class MainWindow(QMainWindow):
             table.insertRow(row)
             for col in range(table.columnCount()):
                 table.setItem(row, col, QTableWidgetItem(""))
+        
+        # Refresh the table
+        table.viewport().update()
     
     def reset_to_today(self):
         self.current_date = datetime.now().date()
@@ -1991,8 +1994,8 @@ class MainWindow(QMainWindow):
                 ).execute()
                 self.show_snackbar(tr('event_update_success'))
                 
-                # Force a refresh from the server
-                QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
+                # Force an immediate refresh from the server
+                self.load_events()
                 
             except Exception as e:
                 QMessageBox.warning(self, tr('error'), f"{tr('event_update_failed')} {str(e)}")
@@ -2014,8 +2017,8 @@ class MainWindow(QMainWindow):
                 ).execute()
                 self.show_snackbar(tr('event_deleted'))
                 
-                # Force a refresh from the server
-                QTimer.singleShot(1000, self.load_events)  # Refresh after 1 second
+                # Force an immediate refresh from the server
+                self.load_events()
                 
             except Exception as e:
                 QMessageBox.warning(self, tr('error'), f"{tr('event_failed')} {str(e)}")
@@ -2038,6 +2041,11 @@ class MainWindow(QMainWindow):
             # Apply theme
             self.change_theme(settings['theme'].lower())
 
+    def force_table_refresh(self):
+        """Force a complete refresh of all tables."""
+        if self.service:
+            self.load_events()
+    
     def show_snackbar(self, message, duration=3000):
         """Show a temporary notification at the bottom of the window."""
         self.snackbar.show_snackbar(message, duration)
