@@ -654,20 +654,79 @@ class AddEventDialog(QDialog):
         self.all_day_check.stateChanged.connect(self.on_all_day_changed)
         layout.addWidget(self.all_day_check)
         
-        # Start date/time
-        layout.addWidget(QLabel(tr('start_datetime')))
-        self.start_datetime = QDateTimeEdit()
-        self.start_datetime.setDateTime(QDateTime.currentDateTime())
-        self.start_datetime.setCalendarPopup(True)
-        self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
-        layout.addWidget(self.start_datetime)
+        # Start date/time section
+        start_container = QWidget()
+        start_layout = QVBoxLayout(start_container)
+        start_layout.setContentsMargins(0, 0, 0, 0)
         
-        # End date/time
-        layout.addWidget(QLabel(tr('end_datetime')))
-        self.end_datetime = QDateTimeEdit()
-        self.end_datetime.setDateTime(QDateTime.currentDateTime().addSecs(3600))
-        self.end_datetime.setCalendarPopup(True)
-        layout.addWidget(self.end_datetime)
+        # Start date label
+        start_date_label = QLabel(tr('start_datetime'))
+        start_layout.addWidget(start_date_label)
+        
+        # Start date and time row
+        start_datetime_row = QWidget()
+        start_datetime_layout = QHBoxLayout(start_datetime_row)
+        start_datetime_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Start date with weekday
+        self.start_date = QDateEdit()
+        self.start_date.setDate(QDate.currentDate())
+        self.start_date.setCalendarPopup(True)
+        self.start_date.setDisplayFormat("yyyy-MM-dd (ddd)")
+        self.start_weekday_label = QLabel()
+        self.start_weekday_label.setMinimumWidth(40)
+        self.start_weekday_label.setAlignment(Qt.AlignCenter)
+        self.update_start_weekday()
+        self.start_date.dateChanged.connect(self.update_start_weekday)
+        
+        # Start time
+        self.start_time = QTimeEdit()
+        self.start_time.setTime(QTime.currentTime())
+        self.start_time.setDisplayFormat("HH:mm")
+        
+        start_datetime_layout.addWidget(self.start_date)
+        start_datetime_layout.addWidget(self.start_weekday_label)
+        start_datetime_layout.addWidget(QLabel(tr('time')))
+        start_datetime_layout.addWidget(self.start_time)
+        start_layout.addWidget(start_datetime_row)
+        layout.addWidget(start_container)
+        
+        # End date/time section
+        end_container = QWidget()
+        end_layout = QVBoxLayout(end_container)
+        end_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # End date label
+        end_date_label = QLabel(tr('end_datetime'))
+        end_layout.addWidget(end_date_label)
+        
+        # End date and time row
+        end_datetime_row = QWidget()
+        end_datetime_layout = QHBoxLayout(end_datetime_row)
+        end_datetime_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # End date with weekday
+        self.end_date = QDateEdit()
+        self.end_date.setDate(QDate.currentDate())
+        self.end_date.setCalendarPopup(True)
+        self.end_date.setDisplayFormat("yyyy-MM-dd (ddd)")
+        self.end_weekday_label = QLabel()
+        self.end_weekday_label.setMinimumWidth(40)
+        self.end_weekday_label.setAlignment(Qt.AlignCenter)
+        self.update_end_weekday()
+        self.end_date.dateChanged.connect(self.update_end_weekday)
+        
+        # End time
+        self.end_time = QTimeEdit()
+        self.end_time.setTime(QTime.currentTime().addSecs(3600))
+        self.end_time.setDisplayFormat("HH:mm")
+        
+        end_datetime_layout.addWidget(self.end_date)
+        end_datetime_layout.addWidget(self.end_weekday_label)
+        end_datetime_layout.addWidget(QLabel(tr('time')))
+        end_datetime_layout.addWidget(self.end_time)
+        end_layout.addWidget(end_datetime_row)
+        layout.addWidget(end_container)
         
         # Remarks with speech input
         remarks_container = QWidget()
@@ -690,9 +749,11 @@ class AddEventDialog(QDialog):
         
         self.setLayout(layout)
         self.setTabOrder(self.name_edit, self.location_edit)
-        self.setTabOrder(self.location_edit, self.start_datetime)
-        self.setTabOrder(self.start_datetime, self.end_datetime)
-        self.setTabOrder(self.end_datetime, self.remarks_edit)
+        self.setTabOrder(self.location_edit, self.start_date)
+        self.setTabOrder(self.start_date, self.start_time)
+        self.setTabOrder(self.start_time, self.end_date)
+        self.setTabOrder(self.end_date, self.end_time)
+        self.setTabOrder(self.end_time, self.remarks_edit)
         self.setTabOrder(self.remarks_edit, self.all_day_check)
         self.setTabOrder(self.all_day_check, self.name_speech)
         self.setTabOrder(self.name_speech, self.location_speech)
@@ -700,8 +761,10 @@ class AddEventDialog(QDialog):
         self.setTabOrder(self.remarks_speech, self.findChild(QDialogButtonBox))
         self.name_edit.setAccessibleName("Event Name")
         self.location_edit.setAccessibleName("Location")
-        self.start_datetime.setAccessibleName("Start DateTime")
-        self.end_datetime.setAccessibleName("End DateTime")
+        self.start_date.setAccessibleName("Start Date")
+        self.start_time.setAccessibleName("Start Time")
+        self.end_date.setAccessibleName("End Date")
+        self.end_time.setAccessibleName("End Time")
         self.remarks_edit.setAccessibleName("Remarks")
         self.all_day_check.setAccessibleName("All Day Event Checkbox")
     
@@ -755,6 +818,10 @@ class AddEventDialog(QDialog):
         # Update microphone button styling too
         self.name_speech.update_theme()
         self.location_speech.update_theme()
+        
+        # Update weekday label styling
+        self.update_start_weekday()
+        self.update_end_weekday()
     
     def load_saved_names(self):
         """Load saved names into the completer for suggestions."""
@@ -795,45 +862,103 @@ class AddEventDialog(QDialog):
             model = QStringListModel(recent_names)
             self.name_completer.setModel(model)
     
-    def setup_datetime_section(self, date_edit, label, show_time=True):
-        # Create a horizontal layout for the date/time section
-        section_layout = QHBoxLayout()
-        section_layout.addWidget(QLabel(label))
+    def update_start_weekday(self):
+        """Update the start weekday label based on selected date."""
+        date = self.start_date.date()
+        weekday = date.dayOfWeek()
+        # Qt returns 1-7 for Monday-Sunday, map to our translation keys
+        weekday_map = {1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat', 7: 'sun'}
+        weekday_key = weekday_map.get(weekday, 'mon')
+        self.start_weekday_label.setText(tr(weekday_key))
         
-        # Add date edit
-        self.date_part = QDateEdit(date_edit)
-        self.date_part.setCalendarPopup(True)
-        section_layout.addWidget(self.date_part)
+        # Update styling based on theme
+        if AppSettings.theme == 'dark':
+            self.start_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #4a9eff;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #2c313a;
+                }
+            """)
+        else:
+            self.start_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #1976d2;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #f5f5f5;
+                }
+            """)
+    
+    def update_end_weekday(self):
+        """Update the end weekday label based on selected date."""
+        date = self.end_date.date()
+        weekday = date.dayOfWeek()
+        # Qt returns 1-7 for Monday-Sunday, map to our translation keys
+        weekday_map = {1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat', 7: 'sun'}
+        weekday_key = weekday_map.get(weekday, 'mon')
+        self.end_weekday_label.setText(tr(weekday_key))
         
-        # Add time edit
-        if show_time:
-            self.time_part = QTimeEdit(date_edit)
-            section_layout.addWidget(self.time_part)
-        
-        return section_layout
+        # Update styling based on theme
+        if AppSettings.theme == 'dark':
+            self.end_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #4a9eff;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #2c313a;
+                }
+            """)
+        else:
+            self.end_weekday_label.setStyleSheet("""
+                QLabel {
+                    color: #1976d2;
+                    font-weight: bold;
+                    padding: 2px;
+                    border-radius: 3px;
+                    background-color: #f5f5f5;
+                }
+            """)
 
     def on_all_day_changed(self, state):
-        # Store current times before changing format
-        start_time = self.start_datetime.time()
-        end_time = self.end_datetime.time()
-        
-        # Change display format based on all-day status
-        self.start_datetime.setDisplayFormat("yyyy-MM-dd" if state else "yyyy-MM-dd HH:mm")
-        self.end_datetime.setDisplayFormat("yyyy-MM-dd" if state else "yyyy-MM-dd HH:mm")
-        
+        """Handle all-day event checkbox state change."""
         if state:
             # For all-day events, set times to start and end of day
-            self.start_datetime.setTime(QTime(0, 0))
-            self.end_datetime.setTime(QTime(23, 59))
+            self.start_time.setTime(QTime(0, 0))
+            self.end_time.setTime(QTime(23, 59))
+            # Hide time inputs for all-day events
+            self.start_time.setVisible(False)
+            self.end_time.setVisible(False)
+            # Hide time labels
+            for widget in self.findChildren(QLabel):
+                if widget.text() == tr('time'):
+                    widget.setVisible(False)
         else:
-            # Restore previous times when switching back to non-all-day
-            self.start_datetime.setTime(start_time)
-            self.end_datetime.setTime(end_time)
+            # Show time inputs for non-all-day events
+            self.start_time.setVisible(True)
+            self.end_time.setVisible(True)
+            # Show time labels
+            for widget in self.findChildren(QLabel):
+                if widget.text() == tr('time'):
+                    widget.setVisible(True)
     
     def get_event_data(self):
         is_all_day = self.all_day_check.isChecked()
-        start_dt = self.start_datetime.dateTime().toPyDateTime()
-        end_dt = self.end_datetime.dateTime().toPyDateTime()
+        
+        # Combine date and time for start datetime
+        start_date = self.start_date.date()
+        start_time = self.start_time.time()
+        start_dt = QDateTime(start_date, start_time).toPyDateTime()
+        
+        # Combine date and time for end datetime
+        end_date = self.end_date.date()
+        end_time = self.end_time.time()
+        end_dt = QDateTime(end_date, end_time).toPyDateTime()
+        
         # Sanitize user input: strip, limit length, remove dangerous chars
         def sanitize(text, maxlen=256):
             return ''.join(c for c in text.strip() if c.isprintable())[:maxlen]
@@ -1075,13 +1200,6 @@ class UpdateEventDialog(AddEventDialog):
         is_all_day = 'date' in event_data['start']
         self.all_day_check.setChecked(is_all_day)
         
-        # Update the datetime display format based on all-day status
-        if is_all_day:
-            self.start_datetime.setDisplayFormat("yyyy-MM-dd")
-            self.end_datetime.setDisplayFormat("yyyy-MM-dd")
-        else:
-            self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
-        
         # Parse start and end times
         start = event_data['start'].get('dateTime', event_data['start'].get('date'))
         end = event_data['end'].get('dateTime', event_data['end'].get('date'))
@@ -1101,16 +1219,24 @@ class UpdateEventDialog(AddEventDialog):
             # Date only - use end of day
             end_dt = datetime.fromisoformat(end)
         
-        # Convert to local time and set in the dialog
-        self.start_datetime.setDateTime(QDateTime(
-            QDate(start_dt.year, start_dt.month, start_dt.day),
-            QTime(start_dt.hour, start_dt.minute)
-        ))
+        # Set the date and time separately
+        self.start_date.setDate(QDate(start_dt.year, start_dt.month, start_dt.day))
+        self.start_time.setTime(QTime(start_dt.hour, start_dt.minute))
+        self.end_date.setDate(QDate(end_dt.year, end_dt.month, end_dt.day))
+        self.end_time.setTime(QTime(end_dt.hour, end_dt.minute))
         
-        self.end_datetime.setDateTime(QDateTime(
-            QDate(end_dt.year, end_dt.month, end_dt.day),
-            QTime(end_dt.hour, end_dt.minute)
-        ))
+        # Update weekday labels
+        self.update_start_weekday()
+        self.update_end_weekday()
+        
+        # Handle all-day event visibility
+        if is_all_day:
+            self.start_time.setVisible(False)
+            self.end_time.setVisible(False)
+            # Hide time labels
+            for widget in self.findChildren(QLabel):
+                if widget.text() == tr('time'):
+                    widget.setVisible(False)
     
     def get_event_data(self):
         """Override to ensure name persistence works for updates too."""
@@ -1961,6 +2087,17 @@ TRANSLATIONS = {
         'cog_tooltip': 'Settings',
         'upcoming_events': 'Upcoming Events',
         'all_day': 'All day',
+        'time': 'Time',
+        'date': 'Date',
+        'start_time': 'Start Time',
+        'end_time': 'End Time',
+        'sun': 'Sun',
+        'mon': 'Mon',
+        'tue': 'Tue',
+        'wed': 'Wed',
+        'thu': 'Thu',
+        'fri': 'Fri',
+        'sat': 'Sat',
     },
     'ja': {
         'language': '言語',
@@ -2020,6 +2157,17 @@ TRANSLATIONS = {
         'cog_tooltip': '設定',
         'upcoming_events': '予定イベント',
         'all_day': '終日',
+        'time': '時間',
+        'date': '日付',
+        'start_time': '開始時間',
+        'end_time': '終了時間',
+        'sun': '日',
+        'mon': '月',
+        'tue': '火',
+        'wed': '水',
+        'thu': '木',
+        'fri': '金',
+        'sat': '土',
     }
 }
 
