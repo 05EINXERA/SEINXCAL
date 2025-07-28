@@ -1790,6 +1790,21 @@ class MainWindow(QMainWindow):
         
         return events_result.get('items', [])
     
+    def format_date_with_weekday(self, dt, include_time=True, is_all_day=False):
+        """Format a datetime object to include weekday."""
+        # Get weekday name
+        weekday_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        weekday = dt.weekday()  # 0=Monday, 6=Sunday
+        weekday_key = weekday_map.get(weekday, 'mon')
+        weekday_name = tr(weekday_key)
+        
+        if is_all_day:
+            return f"{dt.strftime('%Y-%m-%d')} ({weekday_name}) ({tr('all_day')})"
+        elif include_time:
+            return f"{dt.strftime('%Y-%m-%d %H:%M')} ({weekday_name})"
+        else:
+            return f"{dt.strftime('%Y-%m-%d')} ({weekday_name})"
+    
     def populate_table(self, table, events, upcoming_events=None):
         # Clear the table completely
         table.clearContents()
@@ -1818,17 +1833,17 @@ class MainWindow(QMainWindow):
             # Parse datetime strings
             if 'T' in start:
                 start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                start_str = start_dt.strftime("%Y-%m-%d %H:%M")
+                start_str = self.format_date_with_weekday(start_dt, include_time=True, is_all_day=False)
             else:
                 start_dt = datetime.fromisoformat(start)
-                start_str = f"{start_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                start_str = self.format_date_with_weekday(start_dt, include_time=False, is_all_day=True)
             
             if 'T' in end:
                 end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+                end_str = self.format_date_with_weekday(end_dt, include_time=True, is_all_day=False)
             else:
                 end_dt = datetime.fromisoformat(end)
-                end_str = f"{end_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                end_str = self.format_date_with_weekday(end_dt, include_time=False, is_all_day=True)
             
             # Create new items for each cell
             table.setItem(i, 0, QTableWidgetItem(event.get('summary', 'No Title')))
@@ -1878,17 +1893,17 @@ class MainWindow(QMainWindow):
                 
                 if 'T' in start:
                     start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                    start_str = start_dt.strftime("%Y-%m-%d %H:%M")
+                    start_str = self.format_date_with_weekday(start_dt, include_time=True, is_all_day=False)
                 else:
                     start_dt = datetime.fromisoformat(start)
-                    start_str = f"{start_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                    start_str = self.format_date_with_weekday(start_dt, include_time=False, is_all_day=True)
                 
                 if 'T' in end:
                     end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                    end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+                    end_str = self.format_date_with_weekday(end_dt, include_time=True, is_all_day=False)
                 else:
                     end_dt = datetime.fromisoformat(end)
-                    end_str = f"{end_dt.strftime('%Y-%m-%d')} ({tr('all_day')})"
+                    end_str = self.format_date_with_weekday(end_dt, include_time=False, is_all_day=True)
                 
                 table.setItem(current_row, 0, QTableWidgetItem(event.get('summary', 'No Title')))
                 table.setItem(current_row, 1, QTableWidgetItem(event.get('location', '')))
