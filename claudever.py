@@ -2411,7 +2411,7 @@ class MainWindow(QMainWindow):
         if is_all_day:
             return f"{dt.strftime('%Y-%m-%d')} ({weekday_name}) ({tr('all_day')})"
         elif include_time:
-            return f"{dt.strftime('%Y-%m-%d %H:%M')} ({weekday_name})"
+            return f"{dt.strftime('%Y-%m-%d')} ({weekday_name}) {dt.strftime('%H:%M')}"
         else:
             return f"{dt.strftime('%Y-%m-%d')} ({weekday_name})"
     
