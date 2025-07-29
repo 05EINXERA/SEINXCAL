@@ -503,7 +503,7 @@ class SpeechToTextWidget(QWidget):
         if AppSettings.theme == 'dark':
             self.mic_button.setIcon(qta.icon('fa5s.microphone', color='white'))
         else:
-            self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+            self.mic_button.setIcon(qta.icon('fa5s.microphone', color='black'))
         self.mic_button.setToolTip("Click to use voice input for this field")
         self.mic_button.clicked.connect(self.start_listening)
         
@@ -643,7 +643,7 @@ class SpeechToTextWidget(QWidget):
                 }
             """)
         else:
-            self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+            self.mic_button.setIcon(qta.icon('fa5s.microphone', color='black'))
             self.mic_button.setStyleSheet("""
                 QPushButton {
                     border: 1px solid #ccc;
@@ -709,13 +709,13 @@ class ListeningOverlay(QWidget):
         # Status label
         self.status_label = QLabel("Initializing...")
         self.set_status_label_color()
-        self.status_label.setStyleSheet(self.status_label.styleSheet() + "\nfont-size: 16px; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);")
+        self.status_label.setStyleSheet(self.status_label.styleSheet() + "\nfont-size: 16px; font-weight: bold;")
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
         
         # Progress indicator
         self.progress_label = QLabel()
-        self.progress_label.setStyleSheet("font-size: 14px; color: #cccccc; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);")
+        self.progress_label.setStyleSheet("font-size: 14px; color: #cccccc;")
         self.progress_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.progress_label)
         
@@ -741,15 +741,15 @@ class ListeningOverlay(QWidget):
         if AppSettings.theme == 'dark':
             icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color='white')
         else:
-            color = '#4CAF50' if recording else 'white'
+            color = '#4CAF50' if recording else 'gray'
             icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color=color)
         self.mic_label.setPixmap(icon.pixmap(40, 40))  # Slightly larger icon
     
     def set_status_label_color(self):
         if AppSettings.theme == 'dark':
-            self.status_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);")
+            self.status_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
         else:
-            self.status_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);")
+            self.status_label.setStyleSheet("color: black; font-size: 16px; font-weight: bold;")
     
     def update_status(self, status):
         self.current_status = status
@@ -1507,9 +1507,9 @@ class CalendarTable(QTableWidget):
         
         add_btn = QPushButton(self.actions_widget)
         if AppSettings.theme == 'dark':
-            add_icon = QIcon('icons/add_white.png') if os.path.exists('icons/add_white.png') else qta.icon('fa5s.plus', color='white')
+            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus', color='white')
         else:
-            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus')
+            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus', color='black')
         
         add_btn.setIcon(add_icon)
         add_btn.setToolTip('Add Event')
@@ -2152,6 +2152,22 @@ class MainWindow(QMainWindow):
                 QHeaderView::section { background-color: #3a3f4b; color: white; }
                 QPushButton { background-color: #3a3f4b; color: white; border: 1px solid #444a5a; padding: 5px; }
                 QPushButton:hover { background-color: #4f5668; }
+                QDialogButtonBox QPushButton { 
+                    background-color: #3a3f4b; 
+                    color: white; 
+                    border: 1px solid #444a5a; 
+                    padding: 8px 16px; 
+                    border-radius: 4px;
+                    min-width: 80px;
+                }
+                QDialogButtonBox QPushButton:hover { 
+                    background-color: #4f5668; 
+                    border-color: #555a6a;
+                }
+                QDialogButtonBox QPushButton:pressed { 
+                    background-color: #2c313a; 
+                    border-color: #3a3f4b;
+                }
             """)
         else:
             self.setStyleSheet("""
@@ -2164,6 +2180,22 @@ class MainWindow(QMainWindow):
                 QHeaderView::section { background-color: #e0e0e0; color: black; }
                 QPushButton { background-color: #e0e0e0; color: black; border: 1px solid #ccc; padding: 5px; }
                 QPushButton:hover { background-color: #d0d0d0; }
+                QDialogButtonBox QPushButton { 
+                    background-color: #e0e0e0; 
+                    color: black; 
+                    border: 1px solid #ccc; 
+                    padding: 8px 16px; 
+                    border-radius: 4px;
+                    min-width: 80px;
+                }
+                QDialogButtonBox QPushButton:hover { 
+                    background-color: #d0d0d0; 
+                    border-color: #adb5bd;
+                }
+                QDialogButtonBox QPushButton:pressed { 
+                    background-color: #c0c0c0; 
+                    border-color: #a0a0a0;
+                }
             """)
     
     def search_by_date(self):
