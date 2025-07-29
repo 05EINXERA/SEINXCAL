@@ -2364,16 +2364,26 @@ class MainWindow(QMainWindow):
             # Get events using the correctly calculated time range
             date_events = self.get_events_with_timerange(time_min, time_max)
             
-            # Populate today's table with only the date-specific events
+            # Populate the currently active table with the date-specific events
             date_str = target_date.strftime("%Y-%m-%d")
             custom_title = tr('events_for_date').format(date=date_str)
-            self.populate_table(self.today_table, date_events, custom_title=custom_title)
             
-            # Clear past table since we're showing specific date only
-            self.past_table.clearContents()
-            self.past_table.clearSpans()
-            self.past_table.setRowCount(0)
-            self.past_table.event_data = {}
+            # Determine which table is currently visible and populate it
+            current_index = self.stack.currentIndex()
+            if current_index == 0:  # Past Events tab
+                self.populate_table(self.past_table, date_events, custom_title=custom_title)
+                # Clear the other table
+                self.today_table.clearContents()
+                self.today_table.clearSpans()
+                self.today_table.setRowCount(0)
+                self.today_table.event_data = {}
+            else:  # Today's Events tab (index 1)
+                self.populate_table(self.today_table, date_events, custom_title=custom_title)
+                # Clear the other table
+                self.past_table.clearContents()
+                self.past_table.clearSpans()
+                self.past_table.setRowCount(0)
+                self.past_table.event_data = {}
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load events for date: {str(e)}")
