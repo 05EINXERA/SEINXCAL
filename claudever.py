@@ -337,14 +337,56 @@ class WhisperWorker(QThread):
         self.sample_rate = 16000  # Whisper expects 16kHz
         self.temp_file = os.path.join(os.path.expanduser("~"), ".seinxcal_temp_new.wav")
         self.language = "en"  # Default language
+        
+        # Pre-import torch to check device availability
+        try:
+            import torch
+            self.torch_available = True
+            cuda_available = torch.cuda.is_available()
+            self.device = 'cuda' if cuda_available else 'cpu'
+            logger.info(f"[WhisperWorker] Device detection: {self.device}")
+            logger.info(f"[WhisperWorker] Torch version: {torch.__version__}")
+            logger.info(f"[WhisperWorker] CUDA available: {cuda_available}")
+            if cuda_available:
+                logger.info(f"[WhisperWorker] CUDA device count: {torch.cuda.device_count()}")
+                logger.info(f"[WhisperWorker] CUDA device name: {torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'None'}")
+        except ImportError:
+            self.torch_available = False
+            self.device = 'cpu'
+            logger.warning("[WhisperWorker] PyTorch not available, using CPU fallback")
+        except Exception as e:
+            self.torch_available = False
+            self.device = 'cpu'
+            logger.error(f"[WhisperWorker] Error during device detection: {e}")
+            logger.warning("[WhisperWorker] Using CPU fallback due to detection error")
     
     def set_language(self, lang):
         """Set the language for transcription."""
         self.language = lang
     
+    def get_device_info(self):
+        """Get detailed device information for debugging."""
+        try:
+            import torch
+            info = {
+                'torch_version': torch.__version__,
+                'cuda_available': torch.cuda.is_available(),
+                'device': self.device,
+                'torch_available': self.torch_available
+            }
+            if torch.cuda.is_available():
+                info['cuda_device_count'] = torch.cuda.device_count()
+                info['cuda_device_name'] = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'None'
+            return info
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def force_cpu(self):
+        """Force CPU usage for transcription."""
+        self.device = 'cpu'
+        logger.info("[WhisperWorker] Forced CPU usage")
+    
     def run(self):
-        import torch
-        import whisper
         try:
             # Check for ffmpeg
             logger.info(f"[WhisperWorker] Checking ffmpeg: {shutil.which('ffmpeg')}")
@@ -352,6 +394,13 @@ class WhisperWorker(QThread):
                 self.error.emit("ffmpeg is not installed or not in your PATH. Please install ffmpeg and try again.")
                 logger.error("ffmpeg not found in PATH.")
                 return
+            
+            # Check torch availability
+            if not self.torch_available:
+                self.error.emit("PyTorch is not available. Please install torch and try again.")
+                logger.error("PyTorch not available for Whisper")
+                return
+            
             self.status.emit("Recording audio...")
             try:
                 # Record audio from microphone
@@ -364,22 +413,64 @@ class WhisperWorker(QThread):
                 logger.error(f"[WhisperWorker] Audio recording failed: {e}\n{traceback.format_exc()}")
                 self.error.emit(f"Audio recording failed: {e}")
                 return
+            
             self.status.emit("Transcribing...")
             try:
-                # Transcribe using Whisper (GPU if available)
+                # Import torch and whisper here to ensure they're available
+                import torch
+                import whisper
+                
+                # Transcribe using Whisper with proper device selection
                 logger.info(f"[WhisperWorker] Checking temp file before transcription: {self.temp_file}, exists: {os.path.exists(self.temp_file)}")
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                logger.info(f"[WhisperWorker] Using device: {device}")
-                model = whisper.load_model("base", device=device)
+                logger.info(f"[WhisperWorker] Using device: {self.device}")
+                
+                # Load model with explicit device specification
+                model = whisper.load_model("base", device=self.device)
                 result = model.transcribe(self.temp_file, language=self.language)
                 text = result.get("text", "").strip()
+                
                 if not text:
                     self.error.emit("No speech detected. Please try again.")
                 else:
                     self.finished.emit(text)
+                    
             except Exception as e:
                 logger.error(f"[WhisperWorker] Transcription failed: {e}\n{traceback.format_exc()}")
-                self.error.emit(f"Transcription failed: {e}")
+                # If CUDA fails, try CPU fallback
+                if "cuda" in str(e).lower() and self.device == 'cuda':
+                    logger.info("[WhisperWorker] CUDA failed, trying CPU fallback...")
+                    self.status.emit("GPU failed, trying CPU...")
+                    try:
+                        import whisper
+                        model = whisper.load_model("base", device='cpu')
+                        result = model.transcribe(self.temp_file, language=self.language)
+                        text = result.get("text", "").strip()
+                        if text:
+                            logger.info("[WhisperWorker] CPU fallback successful")
+                            self.finished.emit(text)
+                        else:
+                            self.error.emit("No speech detected. Please try again.")
+                    except Exception as cpu_error:
+                        logger.error(f"[WhisperWorker] CPU fallback also failed: {cpu_error}")
+                        self.error.emit(f"Transcription failed on both GPU and CPU: {str(e)}")
+                elif "out of memory" in str(e).lower() and self.device == 'cuda':
+                    logger.info("[WhisperWorker] CUDA out of memory, trying CPU fallback...")
+                    self.status.emit("GPU memory full, trying CPU...")
+                    try:
+                        import whisper
+                        model = whisper.load_model("base", device='cpu')
+                        result = model.transcribe(self.temp_file, language=self.language)
+                        text = result.get("text", "").strip()
+                        if text:
+                            logger.info("[WhisperWorker] CPU fallback successful after OOM")
+                            self.finished.emit(text)
+                        else:
+                            self.error.emit("No speech detected. Please try again.")
+                    except Exception as cpu_error:
+                        logger.error(f"[WhisperWorker] CPU fallback also failed after OOM: {cpu_error}")
+                        self.error.emit(f"Transcription failed on both GPU and CPU: {str(e)}")
+                else:
+                    self.error.emit(f"Transcription failed: {e}")
             finally:
                 # Always clean up temp file
                 if os.path.exists(self.temp_file):
@@ -412,7 +503,7 @@ class SpeechToTextWidget(QWidget):
         if AppSettings.theme == 'dark':
             self.mic_button.setIcon(qta.icon('fa5s.microphone', color='white'))
         else:
-            self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+            self.mic_button.setIcon(qta.icon('fa5s.microphone', color='black'))
         self.mic_button.setToolTip("Click to use voice input for this field")
         self.mic_button.clicked.connect(self.start_listening)
         
@@ -465,33 +556,71 @@ class SpeechToTextWidget(QWidget):
     def set_auto_submit(self, enabled):
         """Set auto-submit mode for speech recognition."""
         self.auto_submit = enabled
+    
+    def force_cpu_usage(self):
+        """Force CPU usage for debugging purposes."""
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.force_cpu()
+    
     def start_listening(self):
         """Start recording and transcribing audio."""
+        # Disable the button first to prevent multiple clicks
         self.mic_button.setEnabled(False)
+        
+        # Ensure the overlay is properly positioned and shown
+        if self.parent():
+            # Force a layout update to ensure proper positioning
+            self.parent().update()
+            QApplication.processEvents()
+        
+        # Small delay to ensure UI stability before showing overlay
+        QTimer.singleShot(50, self._show_overlay_and_start_worker)
+    
+    def _show_overlay_and_start_worker(self):
+        """Show overlay and start the worker with a small delay."""
+        # Show overlay with smooth animation
         self.overlay.show()
+        self.overlay.raise_()  # Ensure it's on top
+        
+        # Create and start the worker
         self.worker = WhisperWorker()
         self.worker.set_language(self.language)
         self.worker.finished.connect(self.on_transcription_complete)
         self.worker.error.connect(self.on_transcription_error)
         self.worker.status.connect(self.on_status_update)
         self.worker.start()
+    
     def on_transcription_complete(self, text):
         """Handle successful transcription."""
+        # Hide overlay smoothly
         self.overlay.hide()
+        
+        # Re-enable the button
         self.mic_button.setEnabled(True)
+        
+        # Emit the captured text
         self.textCaptured.emit(text)
+        
+        # Update the target field if specified
         if self.target_field is not None:
             if isinstance(self.target_field, QTextEdit):
                 self.target_field.append(text)
             else:
                 self.target_field.setText(text)
+    
     def on_transcription_error(self, error_msg):
         """Handle errors during transcription."""
+        # Hide overlay smoothly
         self.overlay.hide()
+        
+        # Re-enable the button
         self.mic_button.setEnabled(True)
+        
+        # Show error message
         QMessageBox.warning(self, "Speech Recognition Error", error_msg)
+    
     def on_status_update(self, status):
-        """Update tooltip with current status."""
+        """Update overlay status and button tooltip."""
         self.overlay.update_status(status)
         self.mic_button.setToolTip(status)
     
@@ -514,7 +643,7 @@ class SpeechToTextWidget(QWidget):
                 }
             """)
         else:
-            self.mic_button.setIcon(qta.icon('fa5s.microphone'))
+            self.mic_button.setIcon(qta.icon('fa5s.microphone', color='black'))
             self.mic_button.setStyleSheet("""
                 QPushButton {
                     border: 1px solid #ccc;
@@ -529,20 +658,37 @@ class SpeechToTextWidget(QWidget):
                     background-color: #dee2e6;
                 }
             """)
-
+    
+    def cleanup(self):
+        """Clean up resources when widget is being destroyed."""
+        if hasattr(self, 'overlay') and self.overlay:
+            self.overlay.hide()
+            self.overlay.deleteLater()
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.quit()
+            self.worker.wait()
+            self.worker.deleteLater()
+    
+    def closeEvent(self, event):
+        """Handle widget close event."""
+        self.cleanup()
+        super().closeEvent(event)
 
 class ListeningOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Make it a popup that stays on top
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        # Use Dialog instead of Popup to prevent flashing and ensure proper stacking
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)  # Don't steal focus
+        self.setAttribute(Qt.WA_NoSystemBackground)  # Prevent system background
         
-        # Create semi-transparent dark background
+        # Create semi-transparent dark background with better styling
         self.setStyleSheet("""
             ListeningOverlay {
-                background-color: rgba(0, 0, 0, 0.7);
-                border-radius: 10px;
+                background-color: rgba(0, 0, 0, 0.8);
+                border-radius: 15px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
             }
             QLabel {
                 color: white;
@@ -552,8 +698,8 @@ class ListeningOverlay(QWidget):
         
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
         
         # Add microphone icon
         self.mic_label = QLabel()
@@ -569,7 +715,7 @@ class ListeningOverlay(QWidget):
         
         # Progress indicator
         self.progress_label = QLabel()
-        self.progress_label.setStyleSheet("font-size: 14px;")
+        self.progress_label.setStyleSheet("font-size: 14px; color: #cccccc;")
         self.progress_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.progress_label)
         
@@ -582,23 +728,28 @@ class ListeningOverlay(QWidget):
         self.timer.start(500)
         
         # Set fixed size for the overlay
-        self.setFixedSize(250, 150)
+        self.setFixedSize(280, 180)
         
         self.current_status = ""
+        
+        # Add fade animation
+        self.fade_anim = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_anim.setDuration(200)
+        self.fade_anim.setEasingCurve(QEasingCurve.InOutQuad)
     
     def update_mic_icon(self, recording=False):
         if AppSettings.theme == 'dark':
             icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color='white')
         else:
-            color = '#4CAF50' if recording else 'black'
+            color = '#4CAF50' if recording else 'gray'
             icon = qta.icon('fa5s.microphone' + ('-slash' if not recording else ''), color=color)
-        self.mic_label.setPixmap(icon.pixmap(32, 32))
+        self.mic_label.setPixmap(icon.pixmap(40, 40))  # Slightly larger icon
     
     def set_status_label_color(self):
         if AppSettings.theme == 'dark':
-            self.status_label.setStyleSheet("color: white;" + "\nfont-size: 16px; font-weight: bold;")
+            self.status_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
         else:
-            self.status_label.setStyleSheet("color: black;" + "\nfont-size: 16px; font-weight: bold;")
+            self.status_label.setStyleSheet("color: black; font-size: 16px; font-weight: bold;")
     
     def update_status(self, status):
         self.current_status = status
@@ -616,13 +767,48 @@ class ListeningOverlay(QWidget):
         self.progress_label.setText("." * self.dots)
     
     def showEvent(self, event):
+        # Ensure proper positioning before showing
         if self.parent():
-            # Center the overlay on the parent widget
-            parent_rect = self.parent().rect()
-            parent_center = self.parent().mapToGlobal(parent_rect.center())
-            self.move(parent_center.x() - self.width() // 2,
-                     parent_center.y() - self.height() // 2)
+            # Try to find the main window for better centering
+            main_window = self.parent()
+            while main_window and not isinstance(main_window, QMainWindow):
+                main_window = main_window.parent()
+            
+            if main_window:
+                # Center on the main window
+                window_rect = main_window.rect()
+                window_center = main_window.mapToGlobal(window_rect.center())
+                self.move(window_center.x() - self.width() // 2,
+                         window_center.y() - self.height() // 2)
+            else:
+                # Fallback to parent widget centering
+                parent_rect = self.parent().rect()
+                parent_center = self.parent().mapToGlobal(parent_rect.center())
+                self.move(parent_center.x() - self.width() // 2,
+                         parent_center.y() - self.height() // 2)
+        
+        # Start with opacity 0 and fade in
+        self.setWindowOpacity(0.0)
         super().showEvent(event)
+        
+        # Fade in animation
+        self.fade_anim.setStartValue(0.0)
+        self.fade_anim.setEndValue(1.0)
+        self.fade_anim.start()
+    
+    def hideEvent(self, event):
+        # Fade out before hiding
+        self.fade_anim.setStartValue(1.0)
+        self.fade_anim.setEndValue(0.0)
+        self.fade_anim.finished.connect(super().hide)
+        self.fade_anim.start()
+        event.ignore()  # Don't hide immediately, let animation handle it
+    
+    def closeEvent(self, event):
+        # Ensure proper cleanup
+        self.timer.stop()
+        self.fade_anim.stop()
+        super().closeEvent(event)
 
 # -----------------------------
 # Security utilities
@@ -1321,9 +1507,9 @@ class CalendarTable(QTableWidget):
         
         add_btn = QPushButton(self.actions_widget)
         if AppSettings.theme == 'dark':
-            add_icon = QIcon('icons/add_white.png') if os.path.exists('icons/add_white.png') else qta.icon('fa5s.plus', color='white')
+            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus', color='white')
         else:
-            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus')
+            add_icon = QIcon('icons/add.png') if os.path.exists('icons/add.png') else qta.icon('fa5s.plus', color='black')
         
         add_btn.setIcon(add_icon)
         add_btn.setToolTip('Add Event')
@@ -1966,6 +2152,22 @@ class MainWindow(QMainWindow):
                 QHeaderView::section { background-color: #3a3f4b; color: white; }
                 QPushButton { background-color: #3a3f4b; color: white; border: 1px solid #444a5a; padding: 5px; }
                 QPushButton:hover { background-color: #4f5668; }
+                QDialogButtonBox QPushButton { 
+                    background-color: #3a3f4b; 
+                    color: white; 
+                    border: 1px solid #444a5a; 
+                    padding: 8px 16px; 
+                    border-radius: 4px;
+                    min-width: 80px;
+                }
+                QDialogButtonBox QPushButton:hover { 
+                    background-color: #4f5668; 
+                    border-color: #555a6a;
+                }
+                QDialogButtonBox QPushButton:pressed { 
+                    background-color: #2c313a; 
+                    border-color: #3a3f4b;
+                }
             """)
         else:
             self.setStyleSheet("""
@@ -1978,6 +2180,22 @@ class MainWindow(QMainWindow):
                 QHeaderView::section { background-color: #e0e0e0; color: black; }
                 QPushButton { background-color: #e0e0e0; color: black; border: 1px solid #ccc; padding: 5px; }
                 QPushButton:hover { background-color: #d0d0d0; }
+                QDialogButtonBox QPushButton { 
+                    background-color: #e0e0e0; 
+                    color: black; 
+                    border: 1px solid #ccc; 
+                    padding: 8px 16px; 
+                    border-radius: 4px;
+                    min-width: 80px;
+                }
+                QDialogButtonBox QPushButton:hover { 
+                    background-color: #d0d0d0; 
+                    border-color: #adb5bd;
+                }
+                QDialogButtonBox QPushButton:pressed { 
+                    background-color: #c0c0c0; 
+                    border-color: #a0a0a0;
+                }
             """)
     
     def search_by_date(self):
