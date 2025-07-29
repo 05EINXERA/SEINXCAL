@@ -1378,7 +1378,63 @@ class AddEventDialog(QDialog):
                 if widget.text() == tr('time'):
                     widget.setVisible(True)
     
+    def validate_input(self):
+        """Validate event input and return (is_valid, error_message)."""
+        # Validate event title
+        event_name = self.name_edit.text().strip()
+        if not event_name:
+            return False, tr('event_title_required')
+        
+        # Validate start date/time
+        start_date = self.start_date.date()
+        if not start_date.isValid():
+            return False, tr('invalid_start_date')
+        
+        # Validate end date/time
+        end_date = self.end_date.date()
+        if not end_date.isValid():
+            return False, tr('invalid_end_date')
+        
+        # Validate start and end time relationship
+        is_all_day = self.all_day_check.isChecked()
+        
+        if is_all_day:
+            # For all-day events, check if start date is before or equal to end date
+            if start_date > end_date:
+                return False, tr('start_date_after_end_date')
+        else:
+            # For timed events, check if start datetime is before end datetime
+            start_dt = QDateTime(start_date, self.start_time.time())
+            end_dt = QDateTime(end_date, self.end_time.time())
+            
+            if not start_dt.isValid():
+                return False, tr('invalid_start_datetime')
+            if not end_dt.isValid():
+                return False, tr('invalid_end_datetime')
+            
+            if start_dt >= end_dt:
+                return False, tr('start_time_after_end_time')
+        
+        return True, ""
+    
+    def accept(self):
+        """Override accept to prevent dialog from closing when validation fails."""
+        event_data = self.get_event_data()
+        if event_data is not None:
+            super().accept()
+    
     def get_event_data(self):
+        # Validate input first
+        is_valid, error_message = self.validate_input()
+        if not is_valid:
+            QMessageBox.warning(self, tr('validation_error'), error_message)
+            # Focus on the event name field if title is missing
+            if not self.name_edit.text().strip():
+                self.name_edit.setFocus()
+                self.name_edit.selectAll()
+            # Return None to keep dialog open
+            return None
+        
         is_all_day = self.all_day_check.isChecked()
         
         # Combine date and time for start datetime
@@ -2226,7 +2282,8 @@ class MainWindow(QMainWindow):
         dialog = AddEventDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             event_data = dialog.get_event_data()
-            self.create_calendar_event(event_data)
+            if event_data:  # Only create event if validation passed
+                self.create_calendar_event(event_data)
     
     def create_calendar_event(self, event_data):
         try:
@@ -2780,6 +2837,14 @@ TRANSLATIONS = {
         'sat': 'Sat',
         'events_for_date': 'Events for {date}',
         'add_disabled_in_search': 'Adding events is disabled in date search mode. Please use "Today" button to return to normal view.',
+        'validation_error': 'Validation Error',
+        'event_title_required': 'Event title is required.',
+        'invalid_start_date': 'Invalid start date.',
+        'invalid_end_date': 'Invalid end date.',
+        'invalid_start_datetime': 'Invalid start date/time.',
+        'invalid_end_datetime': 'Invalid end date/time.',
+        'start_date_after_end_date': 'Start date must be before end date.',
+        'start_time_after_end_time': 'Start time must be before end time.',
     },
     'ja': {
         'language': '言語',
@@ -2852,6 +2917,14 @@ TRANSLATIONS = {
         'sat': '土',
         'events_for_date': '{date}のイベント',
         'add_disabled_in_search': '日付検索モードではイベント追加が無効です。「今日」ボタンを使用して通常表示に戻してください。',
+        'validation_error': '入力エラー',
+        'event_title_required': 'イベント名は必須です。',
+        'invalid_start_date': '開始日が無効です。',
+        'invalid_end_date': '終了日が無効です。',
+        'invalid_start_datetime': '開始日時が無効です。',
+        'invalid_end_datetime': '終了日時が無効です。',
+        'start_date_after_end_date': '開始日は終了日より前である必要があります。',
+        'start_time_after_end_time': '開始時刻は終了時刻より前である必要があります。',
     }
 }
 
