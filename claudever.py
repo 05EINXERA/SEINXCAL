@@ -34,6 +34,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import stat
 import tzlocal
+import pytz
 
 # -----------------------------
 # Logging Setup (with rotation)
@@ -2264,11 +2265,39 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # Get events for the specific date only
-            date_start = datetime.combine(target_date, datetime.min.time())
-            date_end = datetime.combine(target_date, datetime.max.time())
+            # Get local timezone using tzlocal
+            local_tz = tzlocal.get_localzone()
             
-            date_events = self.get_events(date_start, date_end)
+            # Create QDateTime objects for start and end of the selected day
+            selected_qdate = QDate(target_date.year, target_date.month, target_date.day)
+            start_datetime_q = QDateTime(selected_qdate, QTime(0, 0, 0))
+            end_datetime_q = QDateTime(selected_qdate.addDays(1), QTime(0, 0, 0))
+            
+            # Convert QDateTime to timezone-aware Python datetime objects
+            start_datetime = start_datetime_q.toPyDateTime()
+            end_datetime = end_datetime_q.toPyDateTime()
+            
+            # Make them timezone-aware using local timezone
+            # Check if local_tz is pytz or zoneinfo and handle accordingly
+            if hasattr(local_tz, 'localize'):
+                # pytz timezone
+                start_datetime_local = local_tz.localize(start_datetime)
+                end_datetime_local = local_tz.localize(end_datetime)
+            else:
+                # zoneinfo timezone
+                start_datetime_local = start_datetime.replace(tzinfo=local_tz)
+                end_datetime_local = end_datetime.replace(tzinfo=local_tz)
+            
+            # Convert to UTC for Google Calendar API
+            start_datetime_utc = start_datetime_local.astimezone(pytz.utc)
+            end_datetime_utc = end_datetime_local.astimezone(pytz.utc)
+            
+            # Format as ISO 8601 with UTC timezone for Google API
+            time_min = start_datetime_utc.isoformat()
+            time_max = end_datetime_utc.isoformat()
+            
+            # Get events using the correctly calculated time range
+            date_events = self.get_events_with_timerange(time_min, time_max)
             
             # Populate today's table with only the date-specific events
             date_str = target_date.strftime("%Y-%m-%d")
@@ -2289,22 +2318,56 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # Get today's events
-            today_start = datetime.combine(self.current_date, datetime.min.time())
-            today_end = datetime.combine(self.current_date, datetime.max.time())
+            # Get local timezone using tzlocal
+            local_tz = tzlocal.get_localzone()
             
-            today_events = self.get_events(today_start, today_end)
+            # Get today's events with timezone-aware calculation
+            today_qdate = QDate(self.current_date.year, self.current_date.month, self.current_date.day)
+            today_start_q = QDateTime(today_qdate, QTime(0, 0, 0))
+            today_end_q = QDateTime(today_qdate.addDays(1), QTime(0, 0, 0))
+            
+            # Check if local_tz is pytz or zoneinfo and handle accordingly
+            if hasattr(local_tz, 'localize'):
+                # pytz timezone
+                today_start = local_tz.localize(today_start_q.toPyDateTime())
+                today_end = local_tz.localize(today_end_q.toPyDateTime())
+            else:
+                # zoneinfo timezone
+                today_start = today_start_q.toPyDateTime().replace(tzinfo=local_tz)
+                today_end = today_end_q.toPyDateTime().replace(tzinfo=local_tz)
+            
+            today_start_utc = today_start.astimezone(pytz.utc)
+            today_end_utc = today_end.astimezone(pytz.utc)
+            
+            time_min_today = today_start_utc.isoformat()
+            time_max_today = today_end_utc.isoformat()
+            
+            today_events = self.get_events_with_timerange(time_min_today, time_max_today)
             
             # Get upcoming events (next 30 days)
-            upcoming_end = today_end + timedelta(days=30)
-            upcoming_events = self.get_events(today_end, upcoming_end)
+            upcoming_end_q = QDateTime(today_qdate.addDays(31), QTime(0, 0, 0))
+            if hasattr(local_tz, 'localize'):
+                upcoming_end = local_tz.localize(upcoming_end_q.toPyDateTime())
+            else:
+                upcoming_end = upcoming_end_q.toPyDateTime().replace(tzinfo=local_tz)
+            upcoming_end_utc = upcoming_end.astimezone(pytz.utc)
+            time_max_upcoming = upcoming_end_utc.isoformat()
+            
+            upcoming_events = self.get_events_with_timerange(time_max_today, time_max_upcoming)
             
             # Populate today's table with both today's and upcoming events
             self.populate_table(self.today_table, today_events, upcoming_events)
             
             # Get past events (last 30 days)
-            past_start = today_start - timedelta(days=30)
-            past_events = self.get_events(past_start, today_start)
+            past_start_q = QDateTime(today_qdate.addDays(-30), QTime(0, 0, 0))
+            if hasattr(local_tz, 'localize'):
+                past_start = local_tz.localize(past_start_q.toPyDateTime())
+            else:
+                past_start = past_start_q.toPyDateTime().replace(tzinfo=local_tz)
+            past_start_utc = past_start.astimezone(pytz.utc)
+            time_min_past = past_start_utc.isoformat()
+            
+            past_events = self.get_events_with_timerange(time_min_past, time_min_today)
             self.populate_table(self.past_table, past_events)
             
         except Exception as e:
@@ -2315,6 +2378,20 @@ class MainWindow(QMainWindow):
             calendarId=self.calendar_id,
             timeMin=start_time.isoformat() + 'Z',
             timeMax=end_time.isoformat() + 'Z',
+            singleEvents=True,
+            orderBy='startTime',
+            maxResults=2500,  # Get more events
+            showDeleted=False  # Explicitly exclude deleted events
+        ).execute()
+        
+        return events_result.get('items', [])
+    
+    def get_events_with_timerange(self, time_min, time_max):
+        """Get events using pre-formatted timeMin and timeMax strings."""
+        events_result = self.service.events().list(
+            calendarId=self.calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
             singleEvents=True,
             orderBy='startTime',
             maxResults=2500,  # Get more events
