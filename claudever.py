@@ -1876,8 +1876,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.today_table)
         
         # Connect buttons to switch stacks
-        self.past_button.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        self.today_button.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        self.past_button.clicked.connect(self.on_past_button_clicked)
+        self.today_button.clicked.connect(self.on_today_button_clicked)
         
         # Set default to Today & Upcoming
         self.today_button.setChecked(True)
@@ -2559,6 +2559,21 @@ class MainWindow(QMainWindow):
         
         # Refresh the table
         table.viewport().update()
+    
+    def on_past_button_clicked(self):
+        """Handle past button click - reset to normal view if in date-specific mode."""
+        if self.is_date_specific_view:
+            self.reset_to_today()
+            self.stack.setCurrentIndex(0)  # Switch to past events table
+        else:
+            self.stack.setCurrentIndex(0)
+    
+    def on_today_button_clicked(self):
+        """Handle today button click - reset to normal view if in date-specific mode."""
+        if self.is_date_specific_view:
+            self.reset_to_today()
+        else:
+            self.stack.setCurrentIndex(1)
     
     def reset_to_today(self):
         self.current_date = datetime.now().date()
