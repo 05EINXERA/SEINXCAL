@@ -8,7 +8,10 @@ scipy
 sounddevice
 
 # Machine Learning & Speech Recognition
+--find-links https://download.pytorch.org/whl/cu121
 torch
+torchvision
+torchaudio
 openai-whisper
 
 # Google Calendar API
@@ -22,6 +25,7 @@ setuptools
 
 # Time Zone Support
 tzlocal
+pytz
 
 # Optional Dependencies (uncomment if needed)
 # pillow==10.3.0         # For image manipulation
