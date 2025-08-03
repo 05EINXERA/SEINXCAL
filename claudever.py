@@ -34,6 +34,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import stat
 import tzlocal
+import pytz
 
 # -----------------------------
 # Logging Setup (with rotation)
@@ -1360,7 +1361,8 @@ class AddEventDialog(QDialog):
         if state:
             # For all-day events, set times to start and end of day
             self.start_time.setTime(QTime(0, 0))
-            self.end_time.setTime(QTime(23, 59))
+            # Set end time to 23:59:59 for proper all-day coverage
+            self.end_time.setTime(QTime(23, 59, 59))
             # Hide time inputs for all-day events
             self.start_time.setVisible(False)
             self.end_time.setVisible(False)
@@ -1377,7 +1379,70 @@ class AddEventDialog(QDialog):
                 if widget.text() == tr('time'):
                     widget.setVisible(True)
     
+    def validate_input(self):
+        """Validate event input and return (is_valid, error_message)."""
+        # Validate event title
+        event_name = self.name_edit.text().strip()
+        if not event_name:
+            return False, tr('event_title_required')
+        
+        # Validate start date/time
+        start_date = self.start_date.date()
+        if not start_date.isValid():
+            return False, tr('invalid_start_date')
+        
+        # Validate end date/time
+        end_date = self.end_date.date()
+        if not end_date.isValid():
+            return False, tr('invalid_end_date')
+        
+        # Validate date ranges (prevent extreme dates)
+        current_year = QDate.currentDate().year()
+        if start_date.year() < 1900 or start_date.year() > current_year + 10:
+            return False, tr('start_date_out_of_range')
+        if end_date.year() < 1900 or end_date.year() > current_year + 10:
+            return False, tr('end_date_out_of_range')
+        
+        # Validate start and end time relationship
+        is_all_day = self.all_day_check.isChecked()
+        
+        if is_all_day:
+            # For all-day events, check if start date is before or equal to end date
+            if start_date > end_date:
+                return False, tr('start_date_after_end_date')
+        else:
+            # For timed events, check if start datetime is before end datetime
+            start_dt = QDateTime(start_date, self.start_time.time())
+            end_dt = QDateTime(end_date, self.end_time.time())
+            
+            if not start_dt.isValid():
+                return False, tr('invalid_start_datetime')
+            if not end_dt.isValid():
+                return False, tr('invalid_end_datetime')
+            
+            if start_dt >= end_dt:
+                return False, tr('start_time_after_end_time')
+        
+        return True, ""
+    
+    def accept(self):
+        """Override accept to prevent dialog from closing when validation fails."""
+        event_data = self.get_event_data()
+        if event_data is not None:
+            super().accept()
+    
     def get_event_data(self):
+        # Validate input first
+        is_valid, error_message = self.validate_input()
+        if not is_valid:
+            QMessageBox.warning(self, tr('validation_error'), error_message)
+            # Focus on the event name field if title is missing
+            if not self.name_edit.text().strip():
+                self.name_edit.setFocus()
+                self.name_edit.selectAll()
+            # Return None to keep dialog open
+            return None
+        
         is_all_day = self.all_day_check.isChecked()
         
         # Combine date and time for start datetime
@@ -1875,8 +1940,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.today_table)
         
         # Connect buttons to switch stacks
-        self.past_button.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        self.today_button.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        self.past_button.clicked.connect(self.on_past_button_clicked)
+        self.today_button.clicked.connect(self.on_today_button_clicked)
         
         # Set default to Today & Upcoming
         self.today_button.setChecked(True)
@@ -2225,7 +2290,8 @@ class MainWindow(QMainWindow):
         dialog = AddEventDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             event_data = dialog.get_event_data()
-            self.create_calendar_event(event_data)
+            if event_data:  # Only create event if validation passed
+                self.create_calendar_event(event_data)
     
     def create_calendar_event(self, event_data):
         try:
@@ -2264,47 +2330,172 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # Get events for the specific date only
-            date_start = datetime.combine(target_date, datetime.min.time())
-            date_end = datetime.combine(target_date, datetime.max.time())
+            # Get local timezone using tzlocal
+            local_tz = tzlocal.get_localzone()
             
-            date_events = self.get_events(date_start, date_end)
+            # Create QDateTime objects for start and end of the selected day
+            selected_qdate = QDate(target_date.year, target_date.month, target_date.day)
+            start_datetime_q = QDateTime(selected_qdate, QTime(0, 0, 0))
+            end_datetime_q = QDateTime(selected_qdate.addDays(1), QTime(0, 0, 0))
             
-            # Populate today's table with only the date-specific events
+            # Convert QDateTime to timezone-aware Python datetime objects
+            start_datetime = start_datetime_q.toPyDateTime()
+            end_datetime = end_datetime_q.toPyDateTime()
+            
+            # Make them timezone-aware using local timezone
+            # Check if local_tz is pytz or zoneinfo and handle accordingly
+            if hasattr(local_tz, 'localize'):
+                # pytz timezone
+                start_datetime_local = local_tz.localize(start_datetime)
+                end_datetime_local = local_tz.localize(end_datetime)
+            else:
+                # zoneinfo timezone
+                start_datetime_local = start_datetime.replace(tzinfo=local_tz)
+                end_datetime_local = end_datetime.replace(tzinfo=local_tz)
+            
+            # Convert to UTC for Google Calendar API
+            start_datetime_utc = start_datetime_local.astimezone(pytz.utc)
+            end_datetime_utc = end_datetime_local.astimezone(pytz.utc)
+            
+            # Format as ISO 8601 with UTC timezone for Google API
+            time_min = start_datetime_utc.isoformat()
+            time_max = end_datetime_utc.isoformat()
+            
+            # Get events using the correctly calculated time range
+            date_events = self.get_events_with_timerange(time_min, time_max)
+            
+            # Populate the currently active table with the date-specific events
             date_str = target_date.strftime("%Y-%m-%d")
             custom_title = tr('events_for_date').format(date=date_str)
-            self.populate_table(self.today_table, date_events, custom_title=custom_title)
             
-            # Clear past table since we're showing specific date only
-            self.past_table.clearContents()
-            self.past_table.clearSpans()
-            self.past_table.setRowCount(0)
-            self.past_table.event_data = {}
+            # Determine which table is currently visible and populate it
+            current_index = self.stack.currentIndex()
+            if current_index == 0:  # Past Events tab
+                self.populate_table(self.past_table, date_events, custom_title=custom_title)
+                # Clear the other table
+                self.today_table.clearContents()
+                self.today_table.clearSpans()
+                self.today_table.setRowCount(0)
+                self.today_table.event_data = {}
+            else:  # Today's Events tab (index 1)
+                self.populate_table(self.today_table, date_events, custom_title=custom_title)
+                # Clear the other table
+                self.past_table.clearContents()
+                self.past_table.clearSpans()
+                self.past_table.setRowCount(0)
+                self.past_table.event_data = {}
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load events for date: {str(e)}")
+    
+    def categorize_events(self, events, today_start, today_end):
+        """Categorize events into today's events and upcoming events without duplication."""
+        today_events = []
+        upcoming_events = []
+        
+        for event in events:
+            if event.get('status') == 'cancelled':
+                continue
+                
+            # Parse event start and end times
+            start_data = event['start']
+            end_data = event['end']
+            
+            # Handle all-day events
+            if 'date' in start_data:
+                # All-day event
+                start_date = datetime.fromisoformat(start_data['date']).date()
+                end_date = datetime.fromisoformat(end_data['date']).date()
+                
+                # Check if event spans today
+                event_spans_today = (start_date <= today_start.date() and 
+                                   end_date > today_start.date())
+                
+                if event_spans_today:
+                    today_events.append(event)
+                elif start_date > today_end.date():
+                    upcoming_events.append(event)
+                    
+            else:
+                # Timed event
+                start_dt = datetime.fromisoformat(start_data['dateTime'].replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_data['dateTime'].replace('Z', '+00:00'))
+                
+                # Convert to local timezone for comparison
+                local_tz = tzlocal.get_localzone()
+                if hasattr(local_tz, 'localize'):
+                    start_local = local_tz.localize(start_dt.replace(tzinfo=None))
+                    end_local = local_tz.localize(end_dt.replace(tzinfo=None))
+                else:
+                    start_local = start_dt.replace(tzinfo=local_tz)
+                    end_local = end_dt.replace(tzinfo=local_tz)
+                
+                # Check if event is today's event
+                is_today_event = (
+                    start_local < today_end and end_local > today_start
+                )
+                
+                if is_today_event:
+                    today_events.append(event)
+                elif start_local >= today_end:
+                    upcoming_events.append(event)
+        
+        return today_events, upcoming_events
     
     def load_events(self):
         if not self.service:
             return
         
         try:
-            # Get today's events
-            today_start = datetime.combine(self.current_date, datetime.min.time())
-            today_end = datetime.combine(self.current_date, datetime.max.time())
+            # Get local timezone using tzlocal
+            local_tz = tzlocal.get_localzone()
             
-            today_events = self.get_events(today_start, today_end)
+            # Define today's boundaries
+            today_qdate = QDate(self.current_date.year, self.current_date.month, self.current_date.day)
+            today_start_q = QDateTime(today_qdate, QTime(0, 0, 0))
+            today_end_q = QDateTime(today_qdate.addDays(1), QTime(0, 0, 0))
             
-            # Get upcoming events (next 30 days)
-            upcoming_end = today_end + timedelta(days=30)
-            upcoming_events = self.get_events(today_end, upcoming_end)
+            # Convert to timezone-aware datetime objects
+            if hasattr(local_tz, 'localize'):
+                today_start = local_tz.localize(today_start_q.toPyDateTime())
+                today_end = local_tz.localize(today_end_q.toPyDateTime())
+            else:
+                today_start = today_start_q.toPyDateTime().replace(tzinfo=local_tz)
+                today_end = today_end_q.toPyDateTime().replace(tzinfo=local_tz)
             
-            # Populate today's table with both today's and upcoming events
+            # Fetch broader range of events (today + next 30 days)
+            today_start_utc = today_start.astimezone(pytz.utc)
+            upcoming_end_q = QDateTime(today_qdate.addDays(31), QTime(0, 0, 0))
+            if hasattr(local_tz, 'localize'):
+                upcoming_end = local_tz.localize(upcoming_end_q.toPyDateTime())
+            else:
+                upcoming_end = upcoming_end_q.toPyDateTime().replace(tzinfo=local_tz)
+            upcoming_end_utc = upcoming_end.astimezone(pytz.utc)
+            
+            # Fetch all events in the range
+            all_events = self.get_events_with_timerange(
+                today_start_utc.isoformat(), 
+                upcoming_end_utc.isoformat()
+            )
+            
+            # Categorize events without duplication
+            today_events, upcoming_events = self.categorize_events(
+                all_events, today_start, today_end
+            )
+            
+            # Populate today's table with properly categorized events
             self.populate_table(self.today_table, today_events, upcoming_events)
             
             # Get past events (last 30 days)
-            past_start = today_start - timedelta(days=30)
-            past_events = self.get_events(past_start, today_start)
+            past_start_q = QDateTime(today_qdate.addDays(-30), QTime(0, 0, 0))
+            if hasattr(local_tz, 'localize'):
+                past_start = local_tz.localize(past_start_q.toPyDateTime())
+            else:
+                past_start = past_start_q.toPyDateTime().replace(tzinfo=local_tz)
+            past_start_utc = past_start.astimezone(pytz.utc)
+            time_min_past = past_start_utc.isoformat()
+            
+            past_events = self.get_events_with_timerange(time_min_past, today_start_utc.isoformat())
             self.populate_table(self.past_table, past_events)
             
         except Exception as e:
@@ -2315,6 +2506,20 @@ class MainWindow(QMainWindow):
             calendarId=self.calendar_id,
             timeMin=start_time.isoformat() + 'Z',
             timeMax=end_time.isoformat() + 'Z',
+            singleEvents=True,
+            orderBy='startTime',
+            maxResults=2500,  # Get more events
+            showDeleted=False  # Explicitly exclude deleted events
+        ).execute()
+        
+        return events_result.get('items', [])
+    
+    def get_events_with_timerange(self, time_min, time_max):
+        """Get events using pre-formatted timeMin and timeMax strings."""
+        events_result = self.service.events().list(
+            calendarId=self.calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
             singleEvents=True,
             orderBy='startTime',
             maxResults=2500,  # Get more events
@@ -2334,7 +2539,7 @@ class MainWindow(QMainWindow):
         if is_all_day:
             return f"{dt.strftime('%Y-%m-%d')} ({weekday_name}) ({tr('all_day')})"
         elif include_time:
-            return f"{dt.strftime('%Y-%m-%d %H:%M')} ({weekday_name})"
+            return f"{dt.strftime('%Y-%m-%d')} ({weekday_name}) {dt.strftime('%H:%M')}"
         else:
             return f"{dt.strftime('%Y-%m-%d')} ({weekday_name})"
     
@@ -2482,6 +2687,21 @@ class MainWindow(QMainWindow):
         
         # Refresh the table
         table.viewport().update()
+    
+    def on_past_button_clicked(self):
+        """Handle past button click - reset to normal view if in date-specific mode."""
+        if self.is_date_specific_view:
+            self.reset_to_today()
+            self.stack.setCurrentIndex(0)  # Switch to past events table
+        else:
+            self.stack.setCurrentIndex(0)
+    
+    def on_today_button_clicked(self):
+        """Handle today button click - reset to normal view if in date-specific mode."""
+        if self.is_date_specific_view:
+            self.reset_to_today()
+        else:
+            self.stack.setCurrentIndex(1)
     
     def reset_to_today(self):
         self.current_date = datetime.now().date()
@@ -2688,6 +2908,16 @@ TRANSLATIONS = {
         'sat': 'Sat',
         'events_for_date': 'Events for {date}',
         'add_disabled_in_search': 'Adding events is disabled in date search mode. Please use "Today" button to return to normal view.',
+        'validation_error': 'Validation Error',
+        'event_title_required': 'Event title is required.',
+        'invalid_start_date': 'Invalid start date.',
+        'invalid_end_date': 'Invalid end date.',
+        'invalid_start_datetime': 'Invalid start date/time.',
+        'invalid_end_datetime': 'Invalid end date/time.',
+        'start_date_after_end_date': 'Start date must be before end date.',
+        'start_time_after_end_time': 'Start time must be before end time.',
+        'start_date_out_of_range': 'Start date must be between 1900 and 10 years from now.',
+        'end_date_out_of_range': 'End date must be between 1900 and 10 years from now.',
     },
     'ja': {
         'language': '言語',
@@ -2760,6 +2990,16 @@ TRANSLATIONS = {
         'sat': '土',
         'events_for_date': '{date}のイベント',
         'add_disabled_in_search': '日付検索モードではイベント追加が無効です。「今日」ボタンを使用して通常表示に戻してください。',
+        'validation_error': '入力エラー',
+        'event_title_required': 'イベント名は必須です。',
+        'invalid_start_date': '開始日が無効です。',
+        'invalid_end_date': '終了日が無効です。',
+        'invalid_start_datetime': '開始日時が無効です。',
+        'invalid_end_datetime': '終了日時が無効です。',
+        'start_date_after_end_date': '開始日は終了日より前である必要があります。',
+        'start_time_after_end_time': '開始時刻は終了時刻より前である必要があります。',
+        'start_date_out_of_range': '開始日は1900年から10年後までの範囲で入力してください。',
+        'end_date_out_of_range': '終了日は1900年から10年後までの範囲で入力してください。',
     }
 }
 

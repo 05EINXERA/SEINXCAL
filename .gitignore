@@ -4,7 +4,7 @@ token.json
 *.log
 *.spec
 build/
-tenv/
+*env*/
 __pycache__/
 saved_names.txt
 *test*.py
